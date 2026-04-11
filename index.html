@@ -1639,24 +1639,31 @@ function handleExcel(inp){
   r.readAsBinaryString(file);
 }
 function doAutoImport(rows,headers,C){
-  const VP=['Low','Medium','High','Critical'],VS=['Unscheduled','Scheduled','In Progress','Complete'];
   let n=0;
   rows.forEach(row=>{
-    const name=String(row[C.name]??'').trim(),client=String(row[C.client]??'').trim(),address=String(row[C.address]??'').trim();
+    // Just copy data exactly as-is from Excel with minimal processing
+    const name=(row[C.name]??'').toString().trim();
+    const client=(row[C.client]??'').toString().trim();
+    const address=(row[C.address]??'').toString().trim();
     if(!name||!client||!address)return;
-    let priority=C.priority>=0?String(row[C.priority]??'').trim():'Medium';
-    if(!VP.includes(priority))priority='Medium';
-    let status=C.status>=0?String(row[C.status]??'').trim():'Unscheduled';
-    if(!VS.includes(status))status='Unscheduled';
-    S.jobs.push({id:'j'+Date.now()+'-'+n,createdAt:Date.now(),lat:null,lng:null,
-      name,client,address,
-      jobDate:C.jobDate>=0?String(row[C.jobDate]??'').trim()||null:null,
-      priority,status,
-      hours:C.hours>=0?parseFloat(row[C.hours])||null:null,
-      description:C.description>=0?String(row[C.description]??'').trim():'',
+
+    S.jobs.push({
+      id:'j'+Date.now()+'-'+n,
+      createdAt:Date.now(),
+      lat:null,
+      lng:null,
+      name,
+      client,
+      address,
+      jobDate:C.jobDate>=0?(row[C.jobDate]??'').toString().trim()||null:null,
+      priority:C.priority>=0?(row[C.priority]??'').toString().trim()||'Medium':'Medium',
+      status:C.status>=0?(row[C.status]??'').toString().trim()||'Unscheduled':'Unscheduled',
+      hours:C.hours>=0?(row[C.hours]??'')?parseFloat(row[C.hours]):null:null,
+      description:C.description>=0?(row[C.description]??'').toString().trim():'',
       assignedTechId:null,
       requiredManufacturer:null,
-      requiredSkillLevel:1});
+      requiredSkillLevel:1
+    });
     n++;
   });
   saveS();renderJobs();updateCounts();enqueueAll();
@@ -1920,127 +1927,134 @@ document.addEventListener('keydown',e=>{
 async function autoSchedule(){
   const btn=document.getElementById('btn-as');
   btn.disabled=true;
+  toast('Scheduling…','info');
 
-  // Step 1 — geocode any missing addresses
+  // Step 1 — Quick geocoding only if needed (skip if already done)
   const needs=[...S.techs,...S.jobs].filter(x=>x.address&&!x.lat);
   if(needs.length){
-    showLoad(`Geocoding ${needs.length} address${needs.length!==1?'es':''}…`,
-             'Using OpenStreetMap Nominatim — please wait');
+    showLoad(`Geocoding ${needs.length} address${needs.length!==1?'es':''}…`,'');
     const bw=document.getElementById('load-bar-wrap');
     const bar=document.getElementById('load-bar');
     bw.style.display='block';
-    for(let i=0;i<needs.length;i++){
-      const x=needs[i];
-      updLoad(`Geocoding ${i+1} / ${needs.length}: ${x.address.split(',')[0]}…`);
-      bar.style.width=Math.round((i+1)/needs.length*100)+'%';
-      const c=await geocode(x.address);
-      if(c){x.lat=c.lat;x.lng=c.lng;}
+    const batchSize=5; // Faster batching
+    for(let i=0;i<needs.length;i+=batchSize){
+      const batch=needs.slice(i,i+batchSize);
+      const promises=batch.map(async x=>{
+        if(!x.lat){
+          const c=await geocode(x.address);
+          if(c){x.lat=c.lat;x.lng=c.lng;}
+        }
+      });
+      await Promise.all(promises);
+      bar.style.width=Math.round((i+batchSize)/needs.length*100)+'%';
     }
     bw.style.display='none';
     saveS();hideLoad();
   }
 
-  // Step 2 — TWO-PASS ASSIGNMENT FOR EVEN DISTRIBUTION
+  // Step 2 — TWO-PASS ASSIGNMENT FOR EVEN DISTRIBUTION (OPTIMIZED FOR SPEED)
   let unassigned=S.jobs.filter(j=>!j.assignedTechId&&j.status!=='Complete');
   if(!unassigned.length){toast('All jobs are already assigned.','info');btn.disabled=false;renderSched();return;}
 
   const priW={Critical:0,High:1,Medium:2,Low:3};
   const sorted=[...unassigned].sort((a,b)=>(priW[a.priority]||2)-(priW[b.priority]||2));
 
+  // Pre-cache busy dates and job counts for speed
   const busyDates={};
+  const jobCount={};
   S.techs.forEach(t=>{
     busyDates[t.id]=new Set(S.jobs.filter(j=>j.assignedTechId===t.id&&j.jobDate).map(j=>j.jobDate));
+    jobCount[t.id]=S.jobs.filter(j=>j.assignedTechId===t.id&&j.status!=='Complete').length;
   });
 
-  const jobCount={};
-  S.techs.forEach(t=>{jobCount[t.id]=S.jobs.filter(j=>j.assignedTechId===t.id&&j.status!=='Complete').length;});
-
+  const activeTechs=S.techs.filter(t=>t.active!==false); // Cache active techs
   const skipped=[];
 
-  // PASS 1: Assign each job to CLOSEST eligible tech (ignore current load)
+  // PASS 1: Fast assignment to closest eligible tech
   sorted.forEach(job=>{
-    let avail=S.techs.filter(t=>{
-      if(t.active===false)return false;
-      if(job.jobDate&&isTechBlocked(t.id,job.jobDate))return false;
-      if(job.jobDate&&busyDates[t.id].has(job.jobDate))return false;
-      if(!techHasSkill(t,job))return false;
-      return true;
-    });
+    // Quick filter for eligible techs - respects skills
+    let best=null,bestDist=99999;
 
-    // Fallback for unspecified jobs
-    if(!avail.length&&!job.requiredManufacturer){
-      avail=S.techs.filter(t=>{
-        if(t.active===false)return false;
-        if(job.jobDate&&isTechBlocked(t.id,job.jobDate))return false;
-        if(job.jobDate&&busyDates[t.id].has(job.jobDate))return false;
-        return true;
-      });
+    for(let t of activeTechs){
+      // Quick disqualifications
+      if(job.jobDate&&isTechBlocked(t.id,job.jobDate))continue;
+      if(job.jobDate&&busyDates[t.id].has(job.jobDate))continue;
+      if(!techHasSkill(t,job))continue;
+
+      // Calculate distance only if we passed checks
+      let d=10000;
+      if(t.lat&&job.lat)d=hdist(t.lat,t.lng,job.lat,job.lng);
+
+      if(d<bestDist){
+        best=t;
+        bestDist=d;
+      }
     }
 
-    if(!avail.length){skipped.push(job.name);return;}
-
-    // Sort by DISTANCE ONLY - find closest tech
-    avail.sort((t1,t2)=>{
-      let d1=10000,d2=10000;
-      if(t1.lat&&job.lat)d1=hdist(t1.lat,t1.lng,job.lat,job.lng);
-      if(t2.lat&&job.lat)d2=hdist(t2.lat,t2.lng,job.lat,job.lng);
-      return d1-d2;
-    });
-
-    const closest=avail[0];
-    if(closest){
-      job.assignedTechId=closest.id;
-      if(job.status==='Unscheduled')job.status='Scheduled';
-      if(job.jobDate)busyDates[closest.id].add(job.jobDate);
-      jobCount[closest.id]++;
+    // Fallback for unspecified jobs (no skill requirement)
+    if(!best&&!job.requiredManufacturer){
+      for(let t of activeTechs){
+        if(job.jobDate&&isTechBlocked(t.id,job.jobDate))continue;
+        if(job.jobDate&&busyDates[t.id].has(job.jobDate))continue;
+        let d=10000;
+        if(t.lat&&job.lat)d=hdist(t.lat,t.lng,job.lat,job.lng);
+        if(d<bestDist){
+          best=t;
+          bestDist=d;
+        }
+      }
     }
+
+    if(!best){skipped.push(job.name);return;}
+
+    job.assignedTechId=best.id;
+    if(job.status==='Unscheduled')job.status='Scheduled';
+    if(job.jobDate)busyDates[best.id].add(job.jobDate);
+    jobCount[best.id]++;
   });
 
-  // PASS 2: Rebalance distribution — move jobs from overloaded to underloaded techs
+  // PASS 2: Fast rebalancing for even distribution
   const totalJobs=Object.values(jobCount).reduce((a,b)=>a+b,0);
   const avgJobs=Math.floor(totalJobs/S.techs.length);
-  const overThreshold=avgJobs+2; // Techs with more than this are overloaded
+  const overThreshold=avgJobs+2;
 
-  const overloaded=S.techs.filter(t=>jobCount[t.id]>overThreshold);
-  overloaded.forEach(overTech=>{
+  for(let overTech of activeTechs){
+    if(jobCount[overTech.id]<=overThreshold)continue;
+
     const overjobs=S.jobs.filter(j=>j.assignedTechId===overTech.id&&j.status!=='Complete');
 
-    overjobs.forEach(job=>{
-      if(jobCount[overTech.id]<=avgJobs+1)return; // Balanced enough
+    for(let job of overjobs){
+      if(jobCount[overTech.id]<=avgJobs+1)break; // Balanced
 
-      // Find underloaded techs who can take this job
-      const candidates=S.techs.filter(t=>{
-        if(t.id===overTech.id)return false;
-        if(jobCount[t.id]>=avgJobs+1)return false; // Not underloaded
-        if(t.active===false)return false;
-        if(job.jobDate&&isTechBlocked(t.id,job.jobDate))return false;
-        if(job.jobDate&&busyDates[t.id].has(job.jobDate))return false;
-        if(!techHasSkill(t,job))return false;
-        return true;
-      });
+      // Fast search for best candidate
+      let best=null,bestDist=99999;
 
-      if(!candidates.length)return;
+      for(let t of activeTechs){
+        if(t.id===overTech.id)continue;
+        if(jobCount[t.id]>=avgJobs+1)continue; // Not underloaded
+        if(job.jobDate&&isTechBlocked(t.id,job.jobDate))continue;
+        if(job.jobDate&&busyDates[t.id].has(job.jobDate))continue;
+        if(!techHasSkill(t,job))continue;
 
-      // Find best candidate (prefer closer)
-      candidates.sort((t1,t2)=>{
-        let d1=10000,d2=10000;
-        if(t1.lat&&job.lat)d1=hdist(t1.lat,t1.lng,job.lat,job.lng);
-        if(t2.lat&&job.lat)d2=hdist(t2.lat,t2.lng,job.lat,job.lng);
-        return d1-d2;
-      });
+        let d=10000;
+        if(t.lat&&job.lat)d=hdist(t.lat,t.lng,job.lat,job.lng);
+        if(d<bestDist){
+          best=t;
+          bestDist=d;
+        }
+      }
 
-      const newTech=candidates[0];
-      if(newTech){
-        job.assignedTechId=newTech.id;
+      if(best){
+        job.assignedTechId=best.id;
         if(job.jobDate){
           busyDates[overTech.id].delete(job.jobDate);
-          busyDates[newTech.id].add(job.jobDate);
+          busyDates[best.id].add(job.jobDate);
         }
         jobCount[overTech.id]--;
-        jobCount[newTech.id]++;
+        jobCount[best.id]++;
       }
-    });
-  });
+    }
+  }
 
   saveS();renderSched();btn.disabled=false;
 
