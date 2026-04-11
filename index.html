@@ -1682,7 +1682,7 @@ function showXlModal(){
   ];
   document.getElementById('xl-fields').innerHTML=FIELDS.map(f=>{
     const ai=xlData.headers.findIndex(h=>{
-      const hl=h.toLowerCase();
+      const hl=(String(h)||'').toLowerCase();
       return hl===f.k||
         (f.k==='name'&&(hl.includes('job')||hl.includes('number')||hl.includes('work order')||hl.includes('wo #')))||
         (f.k==='client'&&(hl.includes('client')||hl.includes('customer')||hl.includes('service account')||hl.includes('account')))||
