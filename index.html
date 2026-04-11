@@ -124,6 +124,10 @@ select.ifield option{background:#0d1219}
       <span style="flex:1">Schedule</span>
       <span style="background:rgba(16,185,129,.15);color:#34d399;border-radius:12px;padding:1px 8px;font-size:11px">AUTO</span>
     </a>
+    <a class="nav-link" data-page="map" onclick="nav('map')">
+      <i class="fas fa-map" style="width:16px;text-align:center"></i>
+      <span style="flex:1">Map</span>
+    </a>
   </nav>
   <div style="padding:16px;border-top:1px solid #1a2236">
     <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:12px">
@@ -311,6 +315,18 @@ select.ifield option{background:#0d1219}
       <div id="sched-map-wrap" style="display:none">
         <div id="sched-map" style="height:580px;border-radius:14px;overflow:hidden;border:1px solid #1e2840"></div>
       </div>
+    </div>
+
+    <!-- MAP -->
+    <div class="page" id="page-map">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+        <div>
+          <h2 style="font-size:16px;font-weight:700;color:#e2e8f0;margin:0">Coverage Map</h2>
+          <p style="font-size:12px;color:#475569;margin:4px 0 0">All technician locations and assigned jobs</p>
+        </div>
+        <button class="btn-s" onclick="refreshMapPage()"><i class="fas fa-sync-alt"></i> Refresh</button>
+      </div>
+      <div id="map-container" style="height:calc(100vh - 200px);border-radius:14px;overflow:hidden;border:1px solid #1e2840;background:#0d1219"></div>
     </div>
 
   </div>
@@ -857,10 +873,13 @@ function sortTechs(){
   S.techs.sort((a,b)=>a.name.localeCompare(b.name,undefined,{sensitivity:'base'}));
 }
 
-// Re-render the mini map if the home page is currently showing
+// Re-render maps if currently showing
 function refreshMapIfVisible(){
   if(document.getElementById('page-home')?.classList.contains('active')){
     renderMiniMap();
+  }
+  if(document.getElementById('page-map')?.classList.contains('active')){
+    renderMapPage();
   }
 }
 
@@ -878,7 +897,36 @@ function init(){
   nav('home');tick();setInterval(tick,60000);
   // Auto-backup every 5 minutes
   if(SETTINGS.autoBackup)setInterval(()=>{autoBackup();},5*60*1000);
-  rapidGeocode();
+  // Start geocoding silently in background (don't wait for it)
+  silentGeocode();
+}
+async function silentGeocode(){
+  // Same as rapidGeocode but doesn't show UI — just processes silently in background
+  const items=[...S.techs,...S.jobs].filter(x=>x.address&&!x.lat);
+  if(!items.length)return;
+  const batchSize=3;
+  for(let i=0;i<items.length;i+=batchSize){
+    const batch=items.slice(i,i+batchSize);
+    const promises=batch.map(async(obj)=>{
+      const k=obj.address.trim().toLowerCase();
+      if(GC[k]||obj.lat)return;
+      try{
+        const c=await geocode(obj.address);
+        if(c){obj.lat=c.lat;obj.lng=c.lng;}
+      }catch(e){console.warn('Silent geocode failed:',e);}
+    });
+    await Promise.all(promises);
+    saveS();
+    // Quietly refresh visible pages
+    const pg=document.querySelector('.page.active');
+    if(pg){
+      if(pg.id==='page-technicians')renderTechs?.();
+      if(pg.id==='page-jobs')renderJobs?.();
+      if(pg.id==='page-home')renderMiniMap?.();
+      if(pg.id==='page-schedule')renderSched?.();
+      if(pg.id==='page-map')renderMapPage?.();
+    }
+  }
 }
 
 function tick(){
@@ -968,7 +1016,8 @@ function nav(page){
   const H={home:['Dashboard','Overview of scheduling operations'],
             technicians:['Technicians','Manage your field crew'],
             jobs:['Jobs','View and manage all work orders'],
-            schedule:['Schedule','Address-based proximity scheduling with date conflict detection']};
+            schedule:['Schedule','Address-based proximity scheduling with date conflict detection'],
+            map:['Coverage Map','Live view of all technicians and assigned jobs']};
   const[t,s]=H[page]||['',''];
   document.getElementById('page-title').textContent=t;
   document.getElementById('page-sub').textContent=s;
@@ -977,6 +1026,7 @@ function nav(page){
   else if(page==='technicians')renderTechs();
   else if(page==='jobs')renderJobs();
   else if(page==='schedule')renderSched();
+  else if(page==='map')renderMapPage();
 }
 function updateCounts(){
   document.getElementById('cnt-tech').textContent=S.techs.length;
@@ -1050,6 +1100,30 @@ function renderMiniMap(){
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(LM.m);
   S.techs.forEach(t=>{if(t.lat)L.circleMarker([t.lat,t.lng],{radius:5,fillColor:'#0693e3',color:'#fff',weight:1.5,fillOpacity:.9}).bindTooltip(t.name).addTo(LM.m);});
   S.jobs.forEach(j=>{if(j.lat)L.circleMarker([j.lat,j.lng],{radius:4,fillColor:'#f59e0b',color:'#fff',weight:1.5,fillOpacity:.9}).bindTooltip(j.name).addTo(LM.m);});
+}
+function renderMapPage(){
+  if(LM.p){LM.p.remove();delete LM.p;}
+  LM.p=L.map('map-container',{attributionControl:false}).setView([30.3,-97.7],8);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(LM.p);
+
+  // Tech markers (blue)
+  S.techs.forEach((t,i)=>{
+    if(!t.lat)return;
+    const col=PAL[i%PAL.length];
+    const ini=t.name.split(' ').map(n=>n[0]).join('').slice(0,2).toUpperCase();
+    const popup=`<div style="font-size:12px;color:#e2e8f0;min-width:150px"><strong>${esc(t.name)}</strong><br><span style="color:#64748b;font-size:11px">${esc(sa(t.address))}</span><br><span style="color:#0693e3;margin-top:4px;display:block;font-size:11px">${S.jobs.filter(j=>j.assignedTechId===t.id&&j.status!=='Complete').length} active job${S.jobs.filter(j=>j.assignedTechId===t.id&&j.status!=='Complete').length!==1?'s':''}</span></div>`;
+    L.circleMarker([t.lat,t.lng],{radius:7,fillColor:col,color:'#fff',weight:2,fillOpacity:.95}).bindPopup(popup).addTo(LM.p);
+  });
+
+  // Job markers (orange)
+  S.jobs.forEach(j=>{
+    if(!j.lat||j.status==='Complete')return;
+    const popup=`<div style="font-size:12px;color:#e2e8f0;min-width:180px"><strong>${esc(j.name)}</strong><br><span style="color:#64748b;font-size:11px">${esc(j.client)}</span><br><span style="color:#64748b;font-size:11px">${esc(sa(j.address))}</span><br><span style="margin-top:4px;display:block"><span class="badge ${pcls(j.priority)}">${j.priority}</span>${j.status!=='Unscheduled'&&j.assignedTechId?` → <strong>${esc(S.techs.find(t=>t.id===j.assignedTechId)?.name)}</strong>`:''}</span></div>`;
+    L.circleMarker([j.lat,j.lng],{radius:5,fillColor:'#f59e0b',color:'#fff',weight:1.5,fillOpacity:.9}).bindPopup(popup).addTo(LM.p);
+  });
+}
+function refreshMapPage(){
+  if(document.querySelector('.page.active')?.id==='page-map')renderMapPage();
 }
 
 // ── TECHNICIANS ───────────────────────────────────────────
@@ -1418,7 +1492,7 @@ function loadTXAirSysWorkOrders(){
 
 // ── DETECT TEXAS AIRSYSTEMS FORMAT ──────────────────────
 function isTexasAirSystemsFormat(headers){
-  const headerStr=headers.join('|').toLowerCase();
+  const headerStr=headers.map(h=>(h||'').toString()).join('|').toLowerCase();
   return headerStr.includes('work order number')&&headerStr.includes('service account')&&headerStr.includes('short description');
 }
 
@@ -1426,7 +1500,7 @@ function autoImportTexasAirSystems(rows,headers){
   // Auto-map columns for Texas AirSystems "To be scheduled (1).xlsx"
   const h={};
   headers.forEach((header,idx)=>{
-    const hLow=header.toLowerCase();
+    const hLow=(String(header)||'').toLowerCase();
     if(hLow.includes('work order number'))h.woNum=idx;
     if(hLow.includes('service account'))h.account=idx;
     if(hLow.includes('short description'))h.desc=idx;
@@ -1503,7 +1577,8 @@ function autoMapColumns(headers){
     for(const q of queries){
       const qLow=q.toLowerCase();
       const idx=headers.findIndex(h=>{
-        const hLow=h.toLowerCase();
+        if(!h)return false;
+        const hLow=(String(h)||'').toLowerCase();
         return hLow===qLow||hLow.includes(qLow);
       });
       if(idx>=0)return idx;
