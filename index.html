@@ -41,6 +41,7 @@ body{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif
 .data-table tbody tr:hover{background:rgba(6,147,227,.04)}
 .ifield{width:100%;background:#0d1219;border:1px solid #1e2840;border-radius:8px;padding:9px 13px;color:#e2e8f0;font-size:13px;outline:none;transition:border-color .15s}
 .ifield:focus{border-color:#0693e3;box-shadow:0 0 0 3px rgba(6,147,227,.12)}
+.ifield:disabled{background:#0a0e17;color:#475569;cursor:not-allowed;opacity:0.6;border-color:#1a2236}
 /* Address autocomplete */
 .ac-wrap{position:relative;width:100%}
 .ac-drop{position:absolute;top:calc(100% + 4px);left:0;right:0;background:#0d1219;border:1px solid #0693e3;border-radius:8px;z-index:999;max-height:220px;overflow-y:auto;box-shadow:0 8px 24px rgba(0,0,0,.5);display:none}
@@ -81,6 +82,13 @@ select.ifield option{background:#0d1219}
 #loading-overlay.show{display:flex}
 .geo-ok{color:#34d399;font-size:11px;margin-top:5px;display:flex;align-items:center;gap:4px}
 .geo-err{color:#f87171;font-size:11px;margin-top:5px}
+.bulk-select{margin-bottom:12px;padding:12px;background:rgba(6,147,227,.1);border:1px solid rgba(6,147,227,.3);border-radius:8px;display:flex;align-items:center;gap:10px}
+.tab-btn{padding:10px 16px;cursor:pointer;border:none;background:transparent;color:#64748b;border-bottom:2px solid transparent;transition:all .2s;font-size:13px;font-weight:500}
+.tab-btn.active{color:#0693e3;border-bottom-color:#0693e3}
+.tab-content{display:none}
+.tab-content.active{display:block}
+.job-note{padding:8px;background:rgba(255,255,255,.04);border-left:3px solid #0693e3;border-radius:4px;margin:8px 0;font-size:12px;color:#cbd5e1}
+.aging-badge{background:rgba(249,115,22,.15);color:#fb923c;border:1px solid rgba(249,115,22,.25);border-radius:20px;padding:3px 10px;font-size:11px;font-weight:600}
 </style>
 </head>
 <body style="background:#0a0e17;color:#e2e8f0;height:100vh;overflow:hidden;display:flex">
@@ -118,6 +126,17 @@ select.ifield option{background:#0d1219}
     </a>
   </nav>
   <div style="padding:16px;border-top:1px solid #1a2236">
+    <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:12px">
+      <button class="nav-link" onclick="openSettings()" style="flex:1;justify-content:center;border:1px solid #263351">
+        <i class="fas fa-cog"></i><span style="font-size:11px">Settings</span>
+      </button>
+      <button class="nav-link" onclick="openModal('m-backup')" style="flex:1;justify-content:center;border:1px solid #263351">
+        <i class="fas fa-cloud-download-alt"></i><span style="font-size:11px">Backup</span>
+      </button>
+      <button class="nav-link" id="kbd-help" onclick="showKeyboardHelp()" style="flex:1;justify-content:center;border:1px solid #263351">
+        <i class="fas fa-keyboard"></i><span style="font-size:11px">Help</span>
+      </button>
+    </div>
     <div style="display:flex;align-items:center;gap:10px;background:rgba(255,255,255,.04);border-radius:8px;padding:10px 12px">
       <div style="width:32px;height:32px;border-radius:50%;background:rgba(6,147,227,.15);display:flex;align-items:center;justify-content:center;color:#0693e3;font-size:13px"><i class="fas fa-user"></i></div>
       <div>
@@ -151,6 +170,7 @@ select.ifield option{background:#0d1219}
 
     <!-- HOME -->
     <div class="page active" id="page-home">
+      <div id="warnings"></div>
       <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:20px;margin-bottom:24px">
         <div class="stat-card"><div style="display:flex;justify-content:space-between;align-items:flex-start">
           <div><div style="font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Technicians</div>
@@ -228,7 +248,7 @@ select.ifield option{background:#0d1219}
           <input id="job-search" class="ifield" style="width:200px" placeholder="Search jobs…" oninput="renderJobs()">
           <select id="job-filter" class="ifield" style="width:150px" onchange="renderJobs()">
             <option value="">All Statuses</option>
-            <option>Unscheduled</option><option>Scheduled</option><option>In Progress</option><option>Complete</option>
+            <option>Unscheduled</option><option>Scheduled</option><option>In Progress</option>
           </select>
           <select id="job-pfilter" class="ifield" style="width:140px" onchange="renderJobs()">
             <option value="">All Priorities</option>
@@ -236,6 +256,7 @@ select.ifield option{background:#0d1219}
           </select>
         </div>
         <div style="display:flex;gap:10px">
+          <button class="btn-p" onclick="loadTXAirSysWorkOrders()" title="Load work orders from Texas AirSystems Excel files"><i class="fas fa-download"></i> Load TX Work Orders</button>
           <label class="btn-g" style="cursor:pointer">
             <i class="fas fa-file-excel"></i> Import Excel
             <input type="file" id="xl-input" accept=".xlsx,.xls,.csv" style="display:none" onchange="handleExcel(this)">
@@ -243,13 +264,31 @@ select.ifield option{background:#0d1219}
           <button class="btn-p" onclick="openJobModal()"><i class="fas fa-plus"></i> Add Job</button>
         </div>
       </div>
-      <div style="background:#13192a;border:1px solid #1e2840;border-radius:14px;overflow:hidden">
+      <div style="display:flex;border-bottom:1px solid #1e2840;gap:10px;margin-bottom:20px">
+        <button class="tab-btn active" onclick="switchJobTab('active')" id="tab-active">Active Jobs</button>
+        <button class="tab-btn" onclick="switchJobTab('completed')" id="tab-completed">Completed Jobs</button>
+        <button class="tab-btn" onclick="switchJobTab('leaderboard')" id="tab-leaderboard">Leaderboard</button>
+      </div>
+      <div id="bulk-bar" style="display:none;margin-bottom:12px"></div>
+      <div id="tab-active-content" class="tab-content active" style="background:#13192a;border:1px solid #1e2840;border-radius:14px;overflow:hidden">
         <table class="data-table">
           <thead><tr>
-            <th>Job</th><th>Client</th><th>Address</th><th>Date</th><th>Priority</th><th>Status</th><th>Hours</th><th>Tech</th><th style="text-align:right">Actions</th>
+            <th style="width:30px"><input type="checkbox" id="bulk-select-all" onchange="document.querySelectorAll('.bulk-checkbox').forEach(c=>c.checked=this.checked);BULK.selected.clear();document.querySelectorAll('.bulk-checkbox:checked').forEach(c=>BULK.selected.add(c.dataset.id));renderBulkBar();" style="cursor:pointer"></th>
+            <th>Job</th><th>Client</th><th>Address</th><th>Date</th><th>Priority</th><th>Status</th><th>Hours</th><th>Eligible</th><th>Tech</th><th style="text-align:right">Actions</th>
           </tr></thead>
           <tbody id="tbody-jobs"></tbody>
         </table>
+      </div>
+      <div id="tab-completed-content" class="tab-content" style="background:#13192a;border:1px solid #1e2840;border-radius:14px;overflow:hidden">
+        <table class="data-table">
+          <thead><tr>
+            <th>Job</th><th>Client</th><th>Address</th><th>Date</th><th>Priority</th><th>Hours</th><th>Technician</th><th style="text-align:right">Actions</th>
+          </tr></thead>
+          <tbody id="tbody-completed"></tbody>
+        </table>
+      </div>
+      <div id="tab-leaderboard-content" class="tab-content" style="background:#13192a;border:1px solid #1e2840;border-radius:14px;overflow:hidden">
+        <div id="leaderboard-container" style="padding:20px"></div>
       </div>
     </div>
 
@@ -346,6 +385,28 @@ select.ifield option{background:#0d1219}
         <input id="ji-hours" type="number" min="0.5" step="0.5" class="ifield" placeholder="8">
       </div>
       <div>
+        <label style="font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:.06em;display:block;margin-bottom:6px">Required Manufacturer</label>
+        <select id="ji-mfr" class="ifield">
+          <option value="">— No specific requirement —</option>
+          <option>AAON</option>
+          <option>ABB</option>
+          <option>Daikin</option>
+          <option>LG</option>
+          <option>Samsung</option>
+          <option>Aerco Boilers</option>
+          <option>BAC Cooling Towers</option>
+          <option>Armstrong Pumps</option>
+          <option>Venmar</option>
+          <option>Seresco</option>
+          <option>TempMaster</option>
+          <option>Quantech Chillers</option>
+        </select>
+      </div>
+      <div>
+        <label style="font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:.06em;display:block;margin-bottom:6px">Required Skill Level</label>
+        <select id="ji-sklvl" class="ifield"><option value="1">1 (Basic)</option><option value="2">2 (Intermediate)</option><option value="3">3 (Expert)</option></select>
+      </div>
+      <div>
         <label style="font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:.06em;display:block;margin-bottom:6px">Assign Technician</label>
         <select id="ji-tech" class="ifield"><option value="">— Unassigned —</option></select>
       </div>
@@ -355,9 +416,108 @@ select.ifield option{background:#0d1219}
       </div>
     </div>
     <div style="display:flex;gap:10px;margin-top:24px">
-      <button class="btn-p" style="flex:1;justify-content:center" onclick="saveJob()">Save Job</button>
+      <button id="job-save-btn" class="btn-p" style="flex:1;justify-content:center" onclick="saveJob()">Save Job</button>
+      <button id="job-notes-btn" class="btn-s" onclick="openJobNotes()" style="display:none">
+        <i class="fas fa-sticky-note"></i> Notes
+      </button>
       <button class="btn-s" onclick="closeModal('m-job')">Cancel</button>
     </div>
+  </div>
+</div>
+
+<!-- JOB NOTES/HISTORY MODAL -->
+<div class="modal-wrap" id="m-notes" onclick="if(event.target===this)closeModal('m-notes')">
+  <div style="background:#13192a;border:1px solid #263351;border-radius:20px;padding:36px;width:600px;max-width:95vw;max-height:90vh;overflow-y:auto">
+    <h2 style="font-size:18px;font-weight:700;color:#f1f5f9;margin:0 0 20px">Job Notes & Service History</h2>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:20px">
+      <div>
+        <label style="font-size:11px;color:#64748b;text-transform:uppercase;display:block;margin-bottom:6px">Actual Hours Worked</label>
+        <input id="jn-hours" type="number" min="0" step="0.5" class="ifield" placeholder="8">
+      </div>
+      <div>
+        <label style="font-size:11px;color:#64748b;text-transform:uppercase;display:block;margin-bottom:6px">Completion %</label>
+        <input id="jn-completion" type="number" min="0" max="100" class="ifield" placeholder="100">
+      </div>
+    </div>
+    <div style="margin-bottom:20px">
+      <label style="font-size:11px;color:#64748b;text-transform:uppercase;display:block;margin-bottom:6px">Add Service Note</label>
+      <textarea id="jn-note" class="ifield" rows="3" placeholder="Document what was done, issues encountered, etc."></textarea>
+      <button class="btn-p" style="margin-top:8px;width:100%;justify-content:center" onclick="addServiceNote()">Add Note</button>
+    </div>
+    <div style="margin-bottom:20px">
+      <label style="font-size:11px;color:#64748b;text-transform:uppercase;display:block;margin-bottom:10px">History</label>
+      <div id="jn-history" style="max-height:300px;overflow-y:auto"></div>
+    </div>
+    <div style="display:flex;gap:10px">
+      <button class="btn-p" style="flex:1;justify-content:center" onclick="closeModal('m-notes')">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- EXPORT/IMPORT MODAL -->
+<div class="modal-wrap" id="m-backup" onclick="if(event.target===this)closeModal('m-backup')">
+  <div style="background:#13192a;border:1px solid #263351;border-radius:20px;padding:36px;width:500px;max-width:95vw">
+    <h2 style="font-size:18px;font-weight:700;color:#f1f5f9;margin:0 0 24px">Backup & Restore</h2>
+    <div style="display:grid;gap:16px">
+      <div>
+        <h3 style="font-size:13px;font-weight:600;color:#e2e8f0;margin:0 0 10px">Export Data</h3>
+        <p style="font-size:12px;color:#64748b;margin:0 0 10px">Download all schedules, techs, and notes</p>
+        <div style="display:flex;gap:8px">
+          <button class="btn-p" style="flex:1" onclick="exportJSON()"><i class="fas fa-file-code"></i> JSON</button>
+          <button class="btn-p" style="flex:1" onclick="exportCSV()"><i class="fas fa-file-csv"></i> CSV</button>
+        </div>
+      </div>
+      <div style="border-top:1px solid #263351;padding-top:16px">
+        <h3 style="font-size:13px;font-weight:600;color:#e2e8f0;margin:0 0 10px">Restore Data</h3>
+        <p style="font-size:12px;color:#64748b;margin:0 0 10px">Upload a backup file to restore</p>
+        <label class="btn-g" style="cursor:pointer;width:100%;justify-content:center">
+          <i class="fas fa-upload"></i> Choose Backup File
+          <input type="file" id="backup-input" accept=".json" style="display:none" onchange="importJSON(this)">
+        </label>
+      </div>
+    </div>
+    <button class="btn-s" style="width:100%;margin-top:16px;justify-content:center" onclick="closeModal('m-backup')">Close</button>
+  </div>
+</div>
+
+<!-- SETTINGS MODAL -->
+<div class="modal-wrap" id="m-settings" onclick="if(event.target===this)closeModal('m-settings')">
+  <div style="background:#13192a;border:1px solid #263351;border-radius:20px;padding:36px;width:450px;max-width:95vw">
+    <h2 style="font-size:18px;font-weight:700;color:#f1f5f9;margin:0 0 24px">Settings</h2>
+    <div style="display:grid;gap:20px">
+      <div>
+        <label style="display:flex;align-items:center;gap:10px;cursor:pointer">
+          <input type="checkbox" id="set-backup" onchange="SETTINGS.autoBackup=this.checked;saveSettings();toast('Settings saved.');" style="width:18px;height:18px;cursor:pointer">
+          <div>
+            <div style="font-size:13px;font-weight:600;color:#e2e8f0">Auto-Backup Every 5 Minutes</div>
+            <div style="font-size:11px;color:#475569;margin-top:2px">Keep automatic backups for data safety</div>
+          </div>
+        </label>
+      </div>
+      <div style="border-top:1px solid #263351;padding-top:20px">
+        <label style="display:flex;align-items:center;gap:10px;cursor:pointer">
+          <input type="checkbox" id="set-geo" onchange="SETTINGS.showGeoDetails=this.checked;saveSettings();toast('Settings saved.');" style="width:18px;height:18px;cursor:pointer">
+          <div>
+            <div style="font-size:13px;font-weight:600;color:#e2e8f0">Show Geocoding Details</div>
+            <div style="font-size:11px;color:#475569;margin-top:2px">Display coordinates on hover</div>
+          </div>
+        </label>
+      </div>
+      <div style="border-top:1px solid #263351;padding-top:20px">
+        <div style="font-size:13px;font-weight:600;color:#e2e8f0;margin-bottom:8px">Search Radius</div>
+        <div style="display:flex;align-items:center;gap:10px">
+          <input type="range" id="set-radius" min="5" max="50" value="15" onchange="SETTINGS.radius=parseInt(this.value);saveSettings();document.getElementById('radius-val').textContent=this.value;toast('Radius: '+this.value+' miles');" style="flex:1;cursor:pointer">
+          <span id="radius-val" style="font-size:13px;font-weight:600;color:#0693e3;min-width:30px">15</span>
+        </div>
+        <div style="font-size:11px;color:#475569;margin-top:6px">For "nearby technicians" suggestions</div>
+      </div>
+      <div style="border-top:1px solid #263351;padding-top:20px">
+        <button class="btn-r" style="width:100%;justify-content:center" onclick="if(confirm('Clear all data? This cannot be undone.')){{localStorage.clear();location.reload();}}">
+          <i class="fas fa-warning"></i> Clear All Data
+        </button>
+      </div>
+    </div>
+    <button class="btn-s" style="width:100%;margin-top:24px;justify-content:center" onclick="closeModal('m-settings')">Close</button>
   </div>
 </div>
 
@@ -478,15 +638,214 @@ function hdist(lat1,lng1,lat2,lng2){
 }
 function sleep(ms){return new Promise(r=>setTimeout(r,ms));}
 
+// ── VALIDATION & ERROR HANDLING ──────────────────────────
+const VAL={
+  email: e=>e.includes('@')&&e.includes('.'),
+  phone: p=>p.match(/^[\d\s\-\+\(\)]{10,}$/),
+  address: a=>a.trim().length>=5,
+  name: n=>n.trim().length>=2,
+  hours: h=>h>0&&h<=24,
+  zipcode: z=>z.match(/^\d{5}(-\d{4})?$/)||true, // optional
+  isEmpty: v=>!v||v===''||v===null,
+};
+
+function validateTech(t){
+  const err=[];
+  if(!VAL.name(t.name))err.push('Tech name must be 2+ characters');
+  if(!VAL.address(t.address))err.push('Address must be 5+ characters');
+  return err;
+}
+
+function validateJob(j){
+  const err=[];
+  if(!VAL.name(j.name))err.push('Job name must be 2+ characters');
+  if(!VAL.name(j.client))err.push('Client must be 2+ characters');
+  if(!VAL.address(j.address))err.push('Address must be 5+ characters');
+  if(j.hours!==null&&!VAL.hours(j.hours))err.push('Hours must be 0-24');
+  return err;
+}
+
+function detectDuplicates(){
+  const dupTechs=S.techs.filter((t,i,a)=>a.some((t2,j)=>i!==j&&t.name.toLowerCase()===t2.name.toLowerCase()));
+  const dupJobs=S.jobs.filter((j,i,a)=>a.some((j2,k)=>i!==k&&j.name===j2.name&&j.client===j2.client));
+  return {techs:dupTechs,jobs:dupJobs};
+}
+
+// ── UNDO SYSTEM ──────────────────────────────────────────
+let UNDO=[],UNDO_LIMIT=10;
+function pushUndo(action,data){
+  UNDO.push({action,data:JSON.parse(JSON.stringify(data)),at:Date.now()});
+  if(UNDO.length>UNDO_LIMIT)UNDO.shift();
+}
+function undo(){
+  if(!UNDO.length){toast('Nothing to undo','info');return;}
+  const {action,data}=UNDO.pop();
+  Object.assign(S,JSON.parse(JSON.stringify(data)));
+  saveS();
+  const pages=['home','technicians','jobs','schedule'];
+  pages.forEach(p=>{if(document.getElementById('page-'+p)?.classList.contains('active')){nav(p);}});
+  toast(`Undid: ${action}`,'ok');
+}
+
+// ── AUTO-BACKUP SYSTEM ───────────────────────────────────
+function autoBackup(){
+  const key='tas-backup-'+Date.now();
+  localStorage.setItem(key,JSON.stringify(S));
+  const backups=Object.keys(localStorage).filter(k=>k.startsWith('tas-backup-')).sort().reverse();
+  backups.slice(5).forEach(k=>localStorage.removeItem(k)); // Keep 5 most recent
+}
+
+function restoreBackup(){
+  const backups=Object.keys(localStorage).filter(k=>k.startsWith('tas-backup-')).sort().reverse();
+  if(!backups.length){toast('No backups available','info');return;}
+  const options=backups.map(k=>({label:new Date(parseInt(k.replace('tas-backup-',''))).toLocaleString(),key:k}));
+  const idx=prompt(`Backups found:\n\n${options.map((o,i)=>(i+1)+'. '+o.label).join('\n')}\n\nEnter number (1-${options.length}):`,1);
+  if(!idx||idx<1||idx>options.length)return;
+  const backup=JSON.parse(localStorage.getItem(options[idx-1].key));
+  if(!backup||!backup.techs||!backup.jobs){toast('Invalid backup','err');return;}
+  S=backup;saveS();location.reload();
+}
+
+// ── DATA INTEGRITY CHECK ─────────────────────────────────
+function checkIntegrity(){
+  let issues=0;
+  // Remove orphaned job assignments
+  S.jobs.forEach(j=>{if(j.assignedTechId&&!S.techs.find(t=>t.id===j.assignedTechId)){j.assignedTechId=null;issues++;}});
+  // Remove invalid job dates
+  S.jobs.forEach(j=>{if(j.jobDate&&isNaN(new Date(j.jobDate))){j.jobDate=null;issues++;}});
+  // Remove invalid tech active status
+  S.techs.forEach(t=>{if(typeof t.active!=='boolean'&&t.active!==null)t.active=true;});
+  if(issues>0){saveS();console.log(`Fixed ${issues} data integrity issues`);}
+  return issues;
+}
+
+// ── BULK OPERATIONS ──────────────────────────────────────
+let BULK={selected:new Set()};
+function toggleBulkSelect(id){
+  if(BULK.selected.has(id))BULK.selected.delete(id);
+  else BULK.selected.add(id);
+  renderBulkBar();
+}
+function clearBulkSelect(){BULK.selected.clear();renderBulkBar();}
+function renderBulkBar(){
+  const bar=document.getElementById('bulk-bar');
+  if(!bar||!BULK.selected.size){if(bar)bar.style.display='none';return;}
+  bar.style.display='flex';
+  bar.innerHTML=`<div style="flex:1"><span style="font-weight:600">${BULK.selected.size} selected</span></div>
+    <button class="btn-p" onclick="bulkAssignToTech()" style="padding:6px 12px;font-size:12px"><i class="fas fa-link"></i> Assign</button>
+    <button class="btn-r" onclick="bulkDelete()" style="padding:6px 12px;font-size:12px"><i class="fas fa-trash"></i> Delete</button>
+    <button class="btn-s" onclick="clearBulkSelect()" style="padding:6px 12px;font-size:12px">Clear</button>`;
+}
+function bulkAssignToTech(){
+  const techId=prompt('Enter tech ID (or leave blank to unassign):','');
+  if(techId===null)return;
+  const isJob=Array.from(BULK.selected).every(id=>S.jobs.find(j=>j.id===id));
+  const isTech=Array.from(BULK.selected).every(id=>S.techs.find(t=>t.id===id));
+  if(!isJob&&!isTech){toast('Cannot mix jobs and techs','err');return;}
+  if(isJob){
+    const tech=techId?S.techs.find(t=>t.id===techId):null;
+    if(techId&&!tech){toast('Tech not found','err');return;}
+    Array.from(BULK.selected).forEach(id=>{
+      const j=S.jobs.find(x=>x.id===id);
+      if(j){j.assignedTechId=techId||null;if(j.status==='Unscheduled'&&techId)j.status='Scheduled';}
+    });
+    saveS();renderJobs();toast(`Assigned ${BULK.selected.size} jobs`,'ok');clearBulkSelect();
+  }
+}
+function bulkDelete(){
+  if(!confirm(`Delete ${BULK.selected.size} items? This cannot be undone.`))return;
+  const toDelete=Array.from(BULK.selected);
+  const isJob=toDelete.every(id=>S.jobs.find(j=>j.id===id));
+  if(isJob){
+    S.jobs=S.jobs.filter(j=>!toDelete.includes(j.id));
+    saveS();renderJobs();toast(`Deleted ${toDelete.length} jobs`,'ok');clearBulkSelect();
+  }
+}
+
+// ── ANALYTICS & REPORTING ───────────────────────────────
+function getAnalytics(){
+  const totalJobs=S.jobs.length;const completeJobs=S.jobs.filter(j=>j.status==='Complete').length;
+  const avgCompletion=(completeJobs/totalJobs*100).toFixed(1);
+  const techStats={};
+  S.techs.forEach(t=>{
+    const assigned=S.jobs.filter(j=>j.assignedTechId===t.id&&j.status!=='Complete').length;
+    const completed=S.jobs.filter(j=>j.assignedTechId===t.id&&j.status==='Complete').length;
+    const hours=S.jobs.filter(j=>j.assignedTechId===t.id).reduce((s,j)=>s+(j.hours||0),0);
+    techStats[t.id]={assigned,completed,hours,efficiency:(completed/(assigned+completed)||0).toFixed(2)};
+  });
+  return {totalJobs,completeJobs,avgCompletion,techStats};
+}
+
+// ── SETTINGS PANEL ───────────────────────────────────────
+let SETTINGS={radius:15,autoBackup:true,showGeoDetails:false};
+function loadSettings(){
+  try{const s=JSON.parse(localStorage.getItem('tas-settings')||'{}');SETTINGS=Object.assign(SETTINGS,s);}catch(e){}
+}
+function saveSettings(){
+  localStorage.setItem('tas-settings',JSON.stringify(SETTINGS));
+}
+
 // ── STATE ────────────────────────────────────────────────
 let S={techs:[],jobs:[]};
 let eTechId=null,eJobId=null,xlData=null,LM={},LC={},schedView='cards';
 let geoQ=[],geoRunning=false;
+let TECH_SKILLS_MAP={}; // Map of tech name -> {manufacturer -> level}
 
 function loadS(){
   try{const d=localStorage.getItem('tas-v3');if(d){const p=JSON.parse(d);S.techs=p.techs||[];S.jobs=p.jobs||[];}}catch(e){}
 }
-function saveS(){localStorage.setItem('tas-v3',JSON.stringify(S));}
+
+// Initialize tech skills from Excel data
+function initTechSkills(){
+  const skillsData={
+    "Aaron Felan": {"AAON":1,"ABB":2,"Condair/Nortec Humidifiers":3,"FCUs (ETI or IEC)":2,"Temtrol/Nortec or Miller Picking (similar)":2},
+    "Alvin Theis": {"AAON":2,"ABB":2,"Condair/Nortec Humidifiers":2,"BAC Cooling Towers (& other CT brands)":2,"FCUs (ETI or IEC)":2,"LG":3,"LG - ACsmart programming":2,"Samsung VRF":2,"Seresco":2,"TempMaster":2,"Temtrol/Nortec or Miller Picking (similar)":2},
+    "Andrew Aleman": {"AAON":3,"ABB":3,"Aerco Boilers":2,"Condair/Nortec Humidifiers":3,"FCUs (ETI or IEC)":2,"LG":3,"LG - ACsmart programming":2,"Paragon AFMS":2,"Quantech Chillers":3,"TempMaster":3,"Temtrol/Nortec or Miller Picking (similar)":3,"Venmar":3},
+    "Brady Peterson": {"JCI Tempmaster Premier":3},
+    "Christian Chavez": {"AAON":3,"ABB":3,"Above Air (Crac)":3,"Aerco Boilers":3,"Annexaire Crac":3,"Armstrong Pumps":3,"Condair/Nortec Humidifiers":3,"BAC Cooling Towers (& other CT brands)":3,"Daikin":2,"FCUs (ETI or IEC)":3,"LG":3,"LG - ACsmart programming":2,"Multistack Chillers":3,"Paragon AFMS":2,"Quantech Chillers":3,"Seresco":2,"TempMaster":3,"Temtrol/Nortec or Miller Picking (similar)":3,"Tigerflow pumps ":3,"Venmar":3},
+    "Daniel Betancourt": {"AAON":2,"ABB":2,"Condair/Nortec Humidifiers":2,"BAC Cooling Towers (& other CT brands)":2,"Daikin":2,"FCUs (ETI or IEC)":2,"LG":2,"Multistack Chillers":2,"Samsung VRF":2},
+    "DJ Johnson": {"AAON":2,"ABB":2,"Above Air (Crac)":2,"Daikin":2,"LG":2,"LG - ACsmart programming":2},
+    "Edgar Marquez": {"AAON":3,"ABB":3,"Condair/Nortec Humidifiers":2,"BAC Cooling Towers (& other CT brands)":2,"FCUs (ETI or IEC)":2,"JCI Tempmaster Premier":3,"LG":2,"TempMaster":3,"Temtrol/Nortec or Miller Picking (similar)":3,"Venmar":3},
+    "Henry Oranday": {"AAON":3,"ABB":3,"Aerco Boilers":3,"Annexaire Crac":2,"Condair/Nortec Humidifiers":3,"BAC Cooling Towers (& other CT brands)":2,"FCUs (ETI or IEC)":2,"LG":3,"LG - ACsmart programming":2,"Quantech Chillers":3,"Seresco":2,"Temtrol/Nortec or Miller Picking (similar)":3},
+    "Jock Riggin": {"AAON":3,"ABB":3,"Armstrong Pumps":2,"Condair/Nortec Humidifiers":2,"BAC Cooling Towers (& other CT brands)":2,"FCUs (ETI or IEC)":2,"Multistack Chillers":2,"Quantech Chillers":2,"TempMaster":2,"Temtrol/Nortec or Miller Picking (similar)":3,"Tigerflow pumps ":3},
+    "JoeVanni Hernandez": {},
+    "John Jones": {"AAON":2,"ABB":2},
+    "Jose Yanez": {"AAON":2,"ABB":2,"Seresco":2},
+    "Kyle Green": {"AAON":2,"ABB":2,"Condair/Nortec Humidifiers":2,"BAC Cooling Towers (& other CT brands)":2,"FCUs (ETI or IEC)":2,"LG":2,"TempMaster":2,"Temtrol/Nortec or Miller Picking (similar)":2},
+    "Luis Lopez": {"AAON":2,"ABB":2,"FCUs (ETI or IEC)":2},
+    "Luke Hamilton": {"AAON":3,"ABB":3,"Armstrong Pumps":2,"Condair/Nortec Humidifiers":3,"BAC Cooling Towers (& other CT brands)":2,"FCUs (ETI or IEC)":2,"LG":3,"LG - ACsmart programming":2,"Quantech Chillers":2,"Seresco":2,"TempMaster":3,"Temtrol/Nortec or Miller Picking (similar)":3,"Tigerflow pumps ":3},
+    "Marcus Stautz": {"AAON":2,"ABB":2,"Condair/Nortec Humidifiers":2,"BAC Cooling Towers (& other CT brands)":2,"FCUs (ETI or IEC)":2,"LG":2},
+    "Mason Stifflemire": {"AAON":2,"ABB":2,"Aerco Boilers":2,"Condair/Nortec Humidifiers":2,"BAC Cooling Towers (& other CT brands)":2,"Daikin":2,"FCUs (ETI or IEC)":2,"LG":3,"LG - ACsmart programming":2,"Seresco":2,"TempMaster":2,"Temtrol/Nortec or Miller Picking (similar)":2,"Venmar":2},
+    "Matt Speed": {"AAON":3,"ABB":3,"Aerco Boilers":2,"Condair/Nortec Humidifiers":2,"BAC Cooling Towers (& other CT brands)":2,"FCUs (ETI or IEC)":2,"LG":2,"Paragon AFMS":2,"Quantech Chillers":2,"TempMaster":2,"Temtrol/Nortec or Miller Picking (similar)":2,"Venmar":3},
+    "Pedro Jaimes-Santos": {"AAON":2,"ABB":2,"Condair/Nortec Humidifiers":2,"LG":2},
+    "Raul Rangel": {"AAON":2,"ABB":2,"Aerco Boilers":3,"Annexaire Crac":2,"Armstrong Pumps":2,"Condair/Nortec Humidifiers":2,"BAC Cooling Towers (& other CT brands)":2,"FCUs (ETI or IEC)":2,"JCI Tempmaster Premier":2,"LG":2,"Seresco":2,"TempMaster":2,"Temtrol/Nortec or Miller Picking (similar)":2},
+    "Rico Jardine": {"AAON":2,"ABB":3,"Daikin":2,"FCUs (ETI or IEC)":2,"LG":3,"LG - ACsmart programming":2,"Samsung VRF":2,"TempMaster":2},
+    "RJ Jatzlau": {"AAON":3,"ABB":3,"Aerco Boilers":2,"Armstrong Pumps":3,"Condair/Nortec Humidifiers":2,"BAC Cooling Towers (& other CT brands)":2,"Daikin":2,"FCUs (ETI or IEC)":2,"LG":2,"LG - ACsmart programming":2,"Paragon AFMS":2,"TempMaster":2,"Temtrol/Nortec or Miller Picking (similar)":2,"Tigerflow pumps ":2},
+    "Stacy Drayton": {"AAON":2,"ABB":2,"FCUs (ETI or IEC)":2},
+    "Tanner Faris": {"AAON":2,"ABB":2,"Above Air (Crac)":2,"FCUs (ETI or IEC)":3,"LG":2,"TempMaster":2},
+    "Zachary Vasquez": {"AAON":2,"ABB":2,"FCUs (ETI or IEC)":2,"TempMaster":2,"Temtrol/Nortec or Miller Picking (similar)":2},
+    "Martin Velasquez": {"AAON":2,"ABB":2,"Above Air (Crac)":2,"Aerco Boilers":2,"Armstrong Pumps":3,"Condair/Nortec Humidifiers":3,"BAC Cooling Towers (& other CT brands)":2}
+  };
+
+  TECH_SKILLS_MAP = skillsData;
+
+  // Add skills to existing techs
+  S.techs.forEach(t=>{
+    t.skills = TECH_SKILLS_MAP[t.name] || {};
+  });
+}
+function saveS(){
+  // Enforce 100-item limit on completed jobs — delete oldest when limit exceeded
+  const completed=S.jobs.filter(j=>j.status==='Complete').sort((a,b)=>(a.completedAt||0)-(b.completedAt||0));
+  if(completed.length>100){
+    const toDelete=completed.slice(0,completed.length-100);
+    toDelete.forEach(j=>{
+      const idx=S.jobs.indexOf(j);
+      if(idx>=0)S.jobs.splice(idx,1);
+    });
+  }
+  localStorage.setItem('tas-v3',JSON.stringify(S));
+}
 
 // Migrate old data (location-only → address)
 function migrate(){
@@ -506,9 +865,10 @@ function refreshMapIfVisible(){
 }
 
 function init(){
-  loadGC();loadS();migrate();
+  loadGC();loadS();migrate();initTechSkills();loadSettings();
+  checkIntegrity(); // Fix any data issues
   if(!S.techs.length){
-    S.techs=DEF_TECHS.map(([name,address],i)=>({id:'t'+i,name,address,lat:null,lng:null}));
+    S.techs=DEF_TECHS.map(([name,address],i)=>({id:'t'+i,name,address,lat:null,lng:null,skills:TECH_SKILLS_MAP[DEF_TECHS[i][0]]||{}}));
   }
   sortTechs();
   saveS();
@@ -516,7 +876,9 @@ function init(){
     if(e.key==='Escape')['m-tech','m-job','m-del','m-xl'].forEach(closeModal);
   });
   nav('home');tick();setInterval(tick,60000);
-  enqueueAll();
+  // Auto-backup every 5 minutes
+  if(SETTINGS.autoBackup)setInterval(()=>{autoBackup();},5*60*1000);
+  rapidGeocode();
 }
 
 function tick(){
@@ -525,6 +887,40 @@ function tick(){
 }
 
 // ── BACKGROUND GEOCODING ──────────────────────────────────
+async function rapidGeocode(){
+  const items=[...S.techs,...S.jobs].filter(x=>x.address&&!x.lat);
+  if(!items.length)return;
+  const ind=document.getElementById('geo-ind');
+  const msg=document.getElementById('geo-ind-msg');
+  if(ind)ind.style.display='flex';
+
+  // Batch process: 3 items at a time with delay between batches
+  const batchSize=3;
+  for(let i=0;i<items.length;i+=batchSize){
+    const batch=items.slice(i,i+batchSize);
+    const promises=batch.map(async(obj)=>{
+      const k=obj.address.trim().toLowerCase();
+      if(GC[k]||obj.lat)return;
+      try{
+        if(msg)msg.textContent=obj.address.split(',')[0]+'…';
+        const c=await geocode(obj.address);
+        if(c){obj.lat=c.lat;obj.lng=c.lng;}
+      }catch(e){console.warn('Batch geocode failed:',e);}
+    });
+    await Promise.all(promises);
+    saveS();
+    // Refresh visible page
+    const pg=document.querySelector('.page.active');
+    if(pg){
+      if(pg.id==='page-technicians')renderTechs?.();
+      if(pg.id==='page-jobs')renderJobs?.();
+      if(pg.id==='page-home')renderMiniMap?.();
+      if(pg.id==='page-schedule')renderSched?.();
+    }
+  }
+  if(ind)ind.style.display='none';
+}
+
 function enqueueAll(){
   const items=[...S.techs,...S.jobs].filter(x=>x.address&&!x.lat);
   items.forEach(x=>{
@@ -590,10 +986,20 @@ function updateCounts(){
 // ── HOME ─────────────────────────────────────────────────
 function renderHome(){
   const j=S.jobs;
+  checkIntegrity();
   document.getElementById('s-techs').textContent=S.techs.length;
   document.getElementById('s-open').textContent=j.filter(x=>x.status==='Unscheduled').length;
   document.getElementById('s-sched').textContent=j.filter(x=>x.status==='Scheduled'||x.status==='In Progress').length;
   document.getElementById('s-done').textContent=j.filter(x=>x.status==='Complete').length;
+
+  // Check for data quality issues
+  const dups=detectDuplicates();
+  if(dups.techs.length||dups.jobs.length){
+    const w=document.getElementById('warnings');
+    if(w)w.innerHTML=`<div style="background:rgba(251,191,36,.1);border:1px solid rgba(251,191,36,.2);border-radius:8px;padding:12px;margin-bottom:20px;color:#fbbf24;font-size:12px">
+      <i class="fas fa-exclamation-triangle"></i> Found ${dups.techs.length} duplicate techs, ${dups.jobs.length} duplicate jobs. Review data.
+    </div>`;
+  }
   renderStatusChart();renderPriChart();renderRecentJobs();renderMiniMap();
 }
 function renderStatusChart(){
@@ -670,7 +1076,7 @@ function renderTechs(){
         ${!hasStreetNum(t.address)?`<span class="addr-incomplete"><i class="fas fa-exclamation-triangle"></i> Needs full address</span>`:''}
       </td>
       <td>${geo}</td>
-      <td style="color:#94a3b8">${aj} job${aj!==1?'s':''}</td>
+      <td style="color:#94a3b8">${aj} job${aj!==1?'s':''}<div style="font-size:10px;color:#${aj>=8?'ef4444':'475569'}">${aj>=8?'⚠ Overloaded':''}</div></td>
       <td style="text-align:right">
         <button class="ibtn ibtn-b" onclick="openTechModal('${t.id}')" title="Edit"><i class="fas fa-edit"></i></button>
         <button class="ibtn ibtn-r" style="margin-left:6px" onclick="confirmDel('tech','${t.id}','${esc(t.name)}')" title="Delete"><i class="fas fa-trash"></i></button>
@@ -692,41 +1098,75 @@ function openTechModal(id=null){
 function saveTech(){
   const name=document.getElementById('ti-name').value.trim();
   const address=document.getElementById('ti-addr').value.trim();
-  if(!name||!address){toast('Please enter name and address.','err');return;}
+
+  // Validation
+  const tech={name,address};
+  const errs=validateTech(tech);
+  if(errs.length){toast(errs[0],'err');return;}
+
+  // Check for duplicates if new
+  if(!eTechId&&S.techs.some(t=>t.name.toLowerCase()===name.toLowerCase())){
+    if(!confirm('A technician with this name already exists. Add anyway?'))return;
+  }
+
+  // Store undo
+  pushUndo(`${eTechId?'Edit':'Add'} tech: ${name}`,S);
+
   if(eTechId){
     const t=S.techs.find(x=>x.id===eTechId);
-    if(t){const ac=t.address!==address;t.name=name;t.address=address;if(ac){t.lat=null;t.lng=null;}}
+    if(t){const ac=t.address!==address;t.name=name;t.address=address;t.skills=TECH_SKILLS_MAP[name]||{};if(ac){t.lat=null;t.lng=null;}}
   }else{
-    const nw={id:'t'+Date.now(),name,address,lat:null,lng:null};
+    const nw={id:'t'+Date.now(),name,address,lat:null,lng:null,skills:TECH_SKILLS_MAP[name]||{}};
     S.techs.push(nw);
   }
   sortTechs();
-  saveS();closeModal('m-tech');renderTechs();updateCounts();
+  saveS();if(SETTINGS.autoBackup)autoBackup();
+  closeModal('m-tech');renderTechs();updateCounts();
   refreshMapIfVisible();
   toast(eTechId?'Technician updated.':'Technician added.');
   eTechId=null;enqueueAll();
 }
 
 // ── JOBS ────────────────────────────────────────────────
+let jobTab='active';
+function switchJobTab(tab){
+  jobTab=tab;
+  document.getElementById('tab-active').classList.toggle('active',tab==='active');
+  document.getElementById('tab-completed').classList.toggle('active',tab==='completed');
+  document.getElementById('tab-leaderboard').classList.toggle('active',tab==='leaderboard');
+  document.getElementById('tab-active-content').classList.toggle('active',tab==='active');
+  document.getElementById('tab-completed-content').classList.toggle('active',tab==='completed');
+  document.getElementById('tab-leaderboard-content').classList.toggle('active',tab==='leaderboard');
+  renderJobs();
+}
 function renderJobs(){
+  if(jobTab==='completed'){renderCompletedJobs();return;}
+  if(jobTab==='leaderboard'){renderLeaderboard();return;}
+
   const q=(document.getElementById('job-search')?.value||'').toLowerCase();
   const sf=document.getElementById('job-filter')?.value||'';
   const pf=document.getElementById('job-pfilter')?.value||'';
   const tb=document.getElementById('tbody-jobs');
   const list=S.jobs.filter(j=>
+    j.status!=='Complete'&&
     (!q||(j.name+j.client+(j.address||'')).toLowerCase().includes(q))&&
     (!sf||j.status===sf)&&(!pf||j.priority===pf)
   );
-  if(!list.length){tb.innerHTML=`<tr><td colspan="9" style="text-align:center;padding:40px;color:#374151">No jobs found. Add one or import from Excel.</td></tr>`;return;}
+  if(!list.length){tb.innerHTML=`<tr><td colspan="11" style="text-align:center;padding:40px;color:#374151">No active jobs. Add one or import from Excel.</td></tr>`;return;}
   tb.innerHTML=list.map(j=>{
     const tech=j.assignedTechId?S.techs.find(t=>t.id===j.assignedTechId):null;
     const ti=tech?S.techs.indexOf(tech)%PAL.length:0;
     const geo=j.lat
       ?`<i class="fas fa-map-pin" style="color:#34d399;font-size:10px" title="${j.lat.toFixed(4)},${j.lng.toFixed(4)}"></i>`
       :`<i class="fas fa-circle-notch fa-spin" style="color:#fbbf24;font-size:10px" title="Geocoding…"></i>`;
+    const aging=getJobAgingDays(j);
+    const notes=S.notes?.[j.id];
     return `<tr>
+      <td style="text-align:center"><input type="checkbox" class="bulk-checkbox" data-id="${j.id}" onchange="toggleBulkSelect('${j.id}');renderBulkBar();" style="cursor:pointer"></td>
       <td><div style="font-weight:500;color:#e2e8f0">${esc(j.name)}</div>
         ${j.description?`<div style="font-size:11px;color:#475569;margin-top:2px;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(j.description)}</div>`:''}
+        ${aging>0?`<div style="margin-top:4px"><span class="aging-badge"><i class="fas fa-hourglass-start"></i> ${aging}d waiting</span></div>`:''}
+        ${notes?.completion>0?`<div style="margin-top:4px;font-size:10px;color:#34d399">✓ ${notes.completion}% complete</div>`:''}
       </td>
       <td style="color:#64748b">${esc(j.client)}</td>
       <td style="max-width:180px"><div style="display:flex;align-items:center;gap:5px">
@@ -735,7 +1175,8 @@ function renderJobs(){
       <td style="color:#64748b;white-space:nowrap">${j.jobDate?fd(j.jobDate):'<span style="color:#374151">—</span>'}</td>
       <td><span class="badge ${pcls(j.priority)}">${j.priority}</span></td>
       <td><span class="badge ${scls(j.status)}">${j.status}</span></td>
-      <td style="color:#64748b">${j.hours||'—'}h</td>
+      <td style="color:#64748b">${j.hours!=null?j.hours+'h':'—'}</td>
+      <td style="text-align:center"><span style="font-size:12px;color:#0693e3;font-weight:600">${countEligibleTechs(j)}</span><div style="font-size:10px;color:#475569">eligible</div></td>
       <td>${tech?`<div style="display:flex;align-items:center;gap:7px">
         <div style="width:24px;height:24px;border-radius:50%;background:${PAL[ti]}22;color:${PAL[ti]};border:1px solid ${PAL[ti]}44;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700">${tech.name[0]}</div>
         <span style="font-size:12px;color:#94a3b8">${esc(tech.name.split(' ')[0])}</span>
@@ -747,10 +1188,97 @@ function renderJobs(){
     </tr>`;
   }).join('');
 }
+function renderCompletedJobs(){
+  const tb=document.getElementById('tbody-completed');
+  const completed=[...S.jobs].filter(j=>j.status==='Complete').sort((a,b)=>(b.completedAt||0)-(a.completedAt||0));
+  if(!completed.length){tb.innerHTML=`<tr><td colspan="9" style="text-align:center;padding:40px;color:#374151">No completed jobs yet.</td></tr>`;return;}
+  tb.innerHTML=completed.slice(0,100).map(j=>{
+    const tech=j.assignedTechId?S.techs.find(t=>t.id===j.assignedTechId):null;
+    const ti=tech?S.techs.indexOf(tech)%PAL.length:0;
+    return `<tr>
+      <td><div style="font-weight:500;color:#e2e8f0">${esc(j.name)}</div>
+        ${j.description?`<div style="font-size:11px;color:#475569;margin-top:2px;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(j.description)}</div>`:''}
+      </td>
+      <td style="color:#64748b">${esc(j.client)}</td>
+      <td style="max-width:180px;font-size:12px;color:#64748b;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(j.address||'')}">${esc(j.address||'—')}</td>
+      <td style="color:#64748b;white-space:nowrap">${j.jobDate?fd(j.jobDate):'<span style="color:#374151">—</span>'}</td>
+      <td><span class="badge ${pcls(j.priority)}">${j.priority}</span></td>
+      <td style="color:#64748b">${j.hours!=null?j.hours+'h':'—'}</td>
+      <td>${tech?`<div style="display:flex;align-items:center;gap:7px">
+        <div style="width:24px;height:24px;border-radius:50%;background:${PAL[ti]}22;color:${PAL[ti]};border:1px solid ${PAL[ti]}44;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700">${tech.name[0]}</div>
+        <span style="font-size:12px;color:#94a3b8">${esc(tech.name.split(' ')[0])}</span>
+      </div>`:'<span style="color:#374151;font-size:12px">—</span>'}</td>
+      <td style="text-align:right">
+        <button class="ibtn ibtn-b" onclick="openJobModal('${j.id}')" title="Change Status"><i class="fas fa-edit"></i></button>
+        <button class="ibtn ibtn-r" style="margin-left:6px" onclick="confirmDel('job','${j.id}','${esc(j.name)}')" title="Delete"><i class="fas fa-trash"></i></button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+function renderLeaderboard(){
+  const container=document.getElementById('leaderboard-container');
+  const stats={};
+  S.techs.forEach(t=>{
+    stats[t.id]={tech:t,jobs:0,hours:0};
+  });
+  S.jobs.filter(j=>j.status==='Complete'&&j.assignedTechId).forEach(j=>{
+    if(stats[j.assignedTechId]){
+      stats[j.assignedTechId].jobs++;
+      stats[j.assignedTechId].hours+=(j.hours||0);
+    }
+  });
+  const ranked=Object.values(stats).map(s=>({
+    ...s,
+    score:(s.hours*2)+(s.jobs*5)
+  })).sort((a,b)=>b.score-a.score);
+  if(!ranked.length||!ranked.some(r=>r.jobs>0)){
+    container.innerHTML=`<div style="text-align:center;padding:40px;color:#374151">No completed jobs yet. Leaderboard will appear once technicians complete jobs.</div>`;
+    return;
+  }
+  const maxScore=Math.max(...ranked.map(r=>r.score))||1;
+  container.innerHTML=`<div style="display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(280px,1fr))">
+    ${ranked.filter(r=>r.jobs>0).map((r,i)=>{
+      const ti=S.techs.indexOf(r.tech)%PAL.length;
+      const pct=Math.round((r.score/maxScore)*100);
+      return `<div style="background:rgba(6,147,227,.08);border:1px solid rgba(6,147,227,.2);border-radius:12px;padding:16px">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+          <div style="width:40px;height:40px;border-radius:50%;background:${PAL[ti]}22;color:${PAL[ti]};border:2px solid ${PAL[ti]}44;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700">${i+1}</div>
+          <div style="flex:1">
+            <div style="font-weight:600;color:#e2e8f0;font-size:14px">${esc(r.tech.name)}</div>
+            <div style="font-size:11px;color:#64748b">${r.tech.address?'📍 '+esc(sa(r.tech.address)):'No address'}</div>
+          </div>
+        </div>
+        <div style="background:rgba(0,0,0,.2);border-radius:8px;padding:12px;margin-bottom:12px">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:10px">
+            <div>
+              <div style="font-size:11px;color:#94a3b8;margin-bottom:4px">JOBS COMPLETED</div>
+              <div style="font-size:24px;font-weight:800;color:#0693e3">${r.jobs}</div>
+            </div>
+            <div>
+              <div style="font-size:11px;color:#94a3b8;margin-bottom:4px">TOTAL HOURS</div>
+              <div style="font-size:24px;font-weight:800;color:#f59e0b">${r.hours}h</div>
+            </div>
+          </div>
+          <div style="background:rgba(6,147,227,.1);border-radius:6px;overflow:hidden;height:8px;margin-bottom:8px">
+            <div style="background:linear-gradient(90deg,#0693e3,#38bdf8);height:100%;width:${pct}%"></div>
+          </div>
+          <div style="text-align:center">
+            <div style="font-size:13px;font-weight:700;color:#e2e8f0">Score: <span style="color:#34d399">${r.score}</span></div>
+            <div style="font-size:10px;color:#475569;margin-top:2px">Formula: (Hours × 2) + (Jobs × 5)</div>
+          </div>
+        </div>
+      </div>`;
+    }).join('')}
+  </div>`;
+}
 function openJobModal(id=null){
   eJobId=id;
   const j=id?S.jobs.find(x=>x.id===id):null;
-  document.getElementById('m-job-title').textContent=id?'Edit Job':'Add Job';
+  const isCompleted=j?.status==='Complete';
+  document.getElementById('m-job-title').textContent=id?'View Job':'Add Job';
+  document.getElementById('job-save-btn').textContent=isCompleted?'Update Status':'Save Job';
+  const fields=['ji-name','ji-client','ji-addr','ji-date','ji-pri','ji-hours','ji-desc','ji-mfr','ji-sklvl','ji-tech'];
+  fields.forEach(f=>document.getElementById(f).disabled=isCompleted);
   document.getElementById('ji-name').value=j?.name||'';
   document.getElementById('ji-client').value=j?.client||'';
   document.getElementById('ji-addr').value=j?.address||'';
@@ -759,36 +1287,214 @@ function openJobModal(id=null){
   document.getElementById('ji-status').value=j?.status||'Unscheduled';
   document.getElementById('ji-hours').value=j?.hours||'';
   document.getElementById('ji-desc').value=j?.description||'';
+  document.getElementById('ji-mfr').value=j?.requiredManufacturer||'';
+  document.getElementById('ji-sklvl').value=j?.requiredSkillLevel||'1';
   document.getElementById('ji-geo-st').innerHTML=j?.lat
     ?`<span style="color:#34d399"><i class="fas fa-check-circle"></i> Geocoded: ${j.lat.toFixed(5)}, ${j.lng.toFixed(5)}</span>`:'';
   const sel=document.getElementById('ji-tech');
   sel.innerHTML='<option value="">— Unassigned —</option>'+
-    S.techs.map(t=>`<option value="${t.id}"${j?.assignedTechId===t.id?' selected':''}>${esc(t.name)} · ${esc(sa(t.address))}</option>`).join('');
+    S.techs.filter(t=>!j||techHasSkill(t,j)).map(t=>`<option value="${t.id}"${j?.assignedTechId===t.id?' selected':''}>${esc(t.name)} · ${esc(sa(t.address))}</option>`).join('');
+  document.getElementById('job-notes-btn').style.display=id?'flex':'none';
   openModal('m-job');
-  setTimeout(()=>document.getElementById('ji-name').focus(),50);
+  setTimeout(()=>document.getElementById(isCompleted?'ji-status':'ji-name').focus(),50);
 }
 function saveJob(){
   const name=document.getElementById('ji-name').value.trim();
   const client=document.getElementById('ji-client').value.trim();
   const address=document.getElementById('ji-addr').value.trim();
-  if(!name||!client||!address){toast('Job Name, Client, and Address are required.','err');return;}
+  const hours=document.getElementById('ji-hours').value;
+
+  // Validation
+  const job={name,client,address,hours:hours?parseFloat(hours):null};
+  const errs=validateJob(job);
+  if(errs.length){toast(errs[0],'err');return;}
+
   const pl={name,client,address,
     jobDate:document.getElementById('ji-date').value||null,
     priority:document.getElementById('ji-pri').value,
     status:document.getElementById('ji-status').value,
-    hours:parseFloat(document.getElementById('ji-hours').value)||null,
+    hours:hours?parseFloat(hours):null,
     description:document.getElementById('ji-desc').value.trim(),
+    requiredManufacturer:document.getElementById('ji-mfr').value||null,
+    requiredSkillLevel:parseInt(document.getElementById('ji-sklvl').value)||1,
     assignedTechId:document.getElementById('ji-tech').value||null};
+
+  // Store undo
+  pushUndo(`${eJobId?'Edit':'Add'} job: ${name}`,S);
+
   if(eJobId){
     const j=S.jobs.find(x=>x.id===eJobId);
-    if(j){const ac=j.address!==address;Object.assign(j,pl);if(ac){j.lat=null;j.lng=null;}}
+    if(j){
+      const ac=j.address!==address;
+      const wasComplete=j.status==='Complete';
+      const nowComplete=pl.status==='Complete';
+      Object.assign(j,pl);
+      if(ac){j.lat=null;j.lng=null;}
+      if(!wasComplete&&nowComplete)j.completedAt=Date.now();
+      if(wasComplete&&!nowComplete)delete j.completedAt;
+    }
   }else{
-    S.jobs.push({id:'j'+Date.now(),createdAt:Date.now(),lat:null,lng:null,...pl});
+    const newJob={id:'j'+Date.now(),createdAt:Date.now(),lat:null,lng:null,...pl};
+    if(newJob.status==='Complete')newJob.completedAt=Date.now();
+    S.jobs.push(newJob);
   }
-  saveS();closeModal('m-job');renderJobs();updateCounts();
+  saveS();if(SETTINGS.autoBackup)autoBackup();
+  closeModal('m-job');renderJobs();updateCounts();
   refreshMapIfVisible();
   toast(eJobId?'Job updated.':'Job added.');
   eJobId=null;enqueueAll();
+}
+
+// ── LOAD TEXAS AIRSYSTEMS WORK ORDERS ───────────────────
+function loadTXAirSysWorkOrders(){
+  if(S.jobs.length>0){
+    if(!confirm('This will add to existing jobs. Continue?'))return;
+  }
+
+  // Attempt to load from Excel file via fetch
+  async function tryLoad(){
+    try{
+      const resp=await fetch('./To be scheduled (1).xlsx');
+      if(!resp.ok)throw new Error('File not found');
+      const buf=await resp.arrayBuffer();
+      const wb=XLSX.read(buf,{type:'array'});
+      const ws=wb.Sheets[wb.SheetNames[0]];
+      const data=XLSX.utils.sheet_to_json(ws);
+
+      let n=0;
+      data.forEach((row,idx)=>{
+        const address=`${row['Service Account']}, ${row.City} ${row.Zipcode}`.trim();
+        if(!address||!row['Work Order Number'])return;
+
+        // Extract manufacturer from description
+        const desc=(row['Short Description']||'').toLowerCase();
+        let mfr=null;
+        const mfrs=['lg','aaon','abb','daikin','samsung','aerco','bac','jci','venmar','seresco','temtrol','quantech'];
+        for(const m of mfrs){if(desc.includes(m)){mfr=m.toUpperCase();break;}}
+
+        const isComplete=row['System Status']==='Complete';
+        const job={
+          id:'j-'+Date.now()+'-'+n,
+          createdAt:Date.now(),
+          name:row['Work Order Number'],
+          client:row['Service Account'],
+          address:address,
+          description:row['Short Description']||'',
+          priority:'Medium',
+          status:isComplete?'Complete':'Unscheduled',
+          hours:null,
+          jobDate:null,
+          assignedTechId:null,
+          lat:null,lng:null,
+          workOrderNumber:row['Work Order Number'],
+          serviceAccount:row['Service Account'],
+          project:row['Project'],
+          workOrderType:row['Work Order Type'],
+          substatus:row['Substatus'],
+          systemStatus:row['System Status'],
+          salesTeam:row['Sales Team'],
+          underAgreement:row['Under Agreement'],
+          requiredManufacturer:mfr,
+          requiredSkillLevel:1,
+          completedAt:isComplete?Date.now():undefined
+        };
+        S.jobs.push(job);
+        n++;
+      });
+
+      if(n>0){
+        saveS();renderJobs();updateCounts();enqueueAll();
+        toast(`Loaded ${n} work order${n!==1?'s':''} from Texas AirSystems.`);
+      }else{
+        toast('No work orders found in file.','info');
+      }
+    }catch(e){
+      toast('Could not auto-load Excel file. Use the Import Excel button instead.','info');
+    }
+  }
+
+  tryLoad();
+}
+
+// ── DETECT TEXAS AIRSYSTEMS FORMAT ──────────────────────
+function isTexasAirSystemsFormat(headers){
+  const headerStr=headers.join('|').toLowerCase();
+  return headerStr.includes('work order number')&&headerStr.includes('service account')&&headerStr.includes('short description');
+}
+
+function autoImportTexasAirSystems(rows,headers){
+  // Auto-map columns for Texas AirSystems "To be scheduled (1).xlsx"
+  const h={};
+  headers.forEach((header,idx)=>{
+    const hLow=header.toLowerCase();
+    if(hLow.includes('work order number'))h.woNum=idx;
+    if(hLow.includes('service account'))h.account=idx;
+    if(hLow.includes('short description'))h.desc=idx;
+    if(hLow.includes('system status'))h.status=idx;
+    if(hLow.includes('city'))h.city=idx;
+    if(hLow.includes('zipcode')||hLow.includes('zip'))h.zip=idx;
+    if(hLow.includes('work order type'))h.type=idx;
+    if(hLow.includes('project'))h.project=idx;
+    if(hLow.includes('substatus'))h.substatus=idx;
+    if(hLow.includes('sales team'))h.sales=idx;
+    if(hLow.includes('under agreement'))h.agreement=idx;
+  });
+
+  let n=0;
+  const mfrs=['lg','aaon','abb','daikin','samsung','aerco','bac','jci','venmar','seresco','temtrol','quantech','aerco','armstrong','paragon','annexaire'];
+
+  rows.forEach(row=>{
+    const woNum=String(row[h.woNum]||'').trim();
+    const account=String(row[h.account]||'').trim();
+    const desc=String(row[h.desc]||'').toLowerCase();
+    const city=String(row[h.city]||'').trim();
+    const zip=String(row[h.zip]||'').trim();
+    const address=`${account}${city||zip?', '+city+' '+zip:''}`.trim();
+
+    if(!woNum||!account||!address)return;
+
+    // Auto-detect manufacturer
+    let mfr=null;
+    for(const m of mfrs){if(desc.includes(m.toLowerCase())){mfr=m.toUpperCase();break;}}
+
+    // Map spreadsheet status to app status
+    const rawStatus=String(row[h.status]||'').trim();
+    let mappedStatus='Unscheduled';
+    if(rawStatus.toLowerCase().includes('complete'))mappedStatus='Complete';
+    else if(rawStatus.toLowerCase().includes('progress'))mappedStatus='In Progress';
+    else if(rawStatus.toLowerCase().includes('scheduled'))mappedStatus='Scheduled';
+    else if(rawStatus.toLowerCase().includes('unscheduled'))mappedStatus='Unscheduled';
+
+    const job={
+      id:'j-'+Date.now()+'-'+n,
+      createdAt:Date.now(),
+      name:woNum,
+      client:account,
+      address:address,
+      description:String(row[h.desc]||'').trim(),
+      priority:'Medium',
+      status:mappedStatus,
+      hours:null,
+      jobDate:null,
+      assignedTechId:null,
+      lat:null,lng:null,
+      workOrderNumber:woNum,
+      serviceAccount:account,
+      project:String(row[h.project]||'').trim(),
+      workOrderType:String(row[h.type]||'').trim(),
+      substatus:String(row[h.substatus]||'').trim(),
+      systemStatus:rawStatus,
+      salesTeam:String(row[h.sales]||'').trim(),
+      underAgreement:String(row[h.agreement]||'').trim(),
+      requiredManufacturer:mfr,
+      requiredSkillLevel:1
+    };
+    S.jobs.push(job);
+    n++;
+  });
+
+  saveS();renderJobs();updateCounts();enqueueAll();
+  toast(`Auto-imported ${n} work order${n!==1?'s':''} from Texas AirSystems format.`);
 }
 
 // ── EXCEL IMPORT ─────────────────────────────────────────
@@ -801,7 +1507,21 @@ function handleExcel(inp){
       const ws=wb.Sheets[wb.SheetNames[0]];
       const rows=XLSX.utils.sheet_to_json(ws,{header:1,raw:false});
       if(!rows.length){toast('Spreadsheet is empty.','err');return;}
-      xlData={headers:rows[0].map(String),rows:rows.slice(1).filter(r=>r.some(c=>c))};
+
+      const headers=rows[0].map(String);
+      const dataRows=rows.slice(1).filter(r=>r.some(c=>c));
+
+      // Auto-detect Texas AirSystems format
+      if(isTexasAirSystemsFormat(headers)){
+        if(S.jobs.length>0){
+          if(!confirm('This will add to existing jobs. Continue?'))return;
+        }
+        autoImportTexasAirSystems(dataRows,headers);
+        return;
+      }
+
+      // Manual mapping for other formats
+      xlData={headers,rows:dataRows};
       showXlModal();
     }catch(e){toast('Failed to read file: '+e.message,'err');}
     inp.value='';
@@ -872,6 +1592,195 @@ function doImport(){
   xlData=null;enqueueAll();
 }
 
+// ── SKILL MATCHING ────────────────────────────────────────
+function techHasSkill(tech, job){
+  // If job has no required manufacturer, all techs qualify
+  if(!job.requiredManufacturer)return true;
+  const techSkills=tech.skills||{};
+  const requiredLevel=job.requiredSkillLevel||1;
+
+  // Check if tech has the exact manufacturer match
+  if(techSkills[job.requiredManufacturer]!==undefined){
+    return techSkills[job.requiredManufacturer]>=requiredLevel;
+  }
+
+  // Check for close matches (partial manufacturer names)
+  for(const[mfr,level]of Object.entries(techSkills)){
+    if(mfr.toUpperCase().includes(job.requiredManufacturer.toUpperCase())||
+       job.requiredManufacturer.toUpperCase().includes(mfr.toUpperCase())){
+      return level>=requiredLevel;
+    }
+  }
+  return false;
+}
+
+function countEligibleTechs(job){
+  return S.techs.filter(t=>t.active!==false&&techHasSkill(t,job)).length;
+}
+
+// ── JOB NOTES & SERVICE HISTORY ──────────────────────────
+function ensureJobNotes(jobId){
+  if(!S.notes)S.notes={};
+  if(!S.notes[jobId])S.notes[jobId]={history:[],actualHours:null,completion:0};
+  return S.notes[jobId];
+}
+
+function openJobNotes(){
+  if(!eJobId)return;
+  const notes=ensureJobNotes(eJobId);
+  document.getElementById('jn-hours').value=notes.actualHours||'';
+  document.getElementById('jn-completion').value=notes.completion||0;
+  document.getElementById('jn-note').value='';
+  document.getElementById('jn-history').innerHTML=notes.history.length?
+    notes.history.map(n=>`<div class="job-note">
+      <div style="font-size:11px;color:#0693e3;margin-bottom:4px">${new Date(n.t).toLocaleString()}</div>
+      <div>${esc(n.text)}</div>
+      ${n.hours?`<div style="margin-top:4px;font-size:11px;color:#34d399">⏱ ${n.hours}h worked</div>`:''}
+    </div>`).join(''):
+    '<div style="color:#374151;font-size:12px">No notes yet</div>';
+  openModal('m-notes');
+}
+
+function addServiceNote(){
+  if(!eJobId)return;
+  const notes=ensureJobNotes(eJobId);
+  const text=document.getElementById('jn-note').value.trim();
+  const hours=parseFloat(document.getElementById('jn-hours').value)||null;
+  const completion=parseInt(document.getElementById('jn-completion').value)||0;
+  if(!text&&!hours){toast('Add a note or hours worked.','err');return;}
+  notes.history.push({t:Date.now(),text,hours});
+  notes.actualHours=hours;
+  notes.completion=completion;
+  saveS();openJobNotes();
+  toast('Service note added.');
+}
+
+// ── JOB AGING CALCULATION ───────────────────────────────
+function getJobAgingDays(job){
+  if(!job.createdAt)return 0;
+  return Math.floor((Date.now()-job.createdAt)/(1000*60*60*24));
+}
+
+// ── EXPORT & IMPORT ──────────────────────────────────────
+function exportJSON(){
+  const data={exportDate:new Date().toISOString(),techs:S.techs,jobs:S.jobs,notes:S.notes||{}};
+  const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url;
+  a.download='tas-backup-'+new Date().toISOString().split('T')[0]+'.json';
+  a.click();
+  URL.revokeObjectURL(url);
+  toast('Exported JSON backup.');
+}
+
+function exportCSV(){
+  let csv='WO Number,Client,Address,Status,Priority,Hours,Tech,Created,Aging Days\n';
+  S.jobs.forEach(j=>{
+    const tech=j.assignedTechId?S.techs.find(t=>t.id===j.assignedTechId):null;
+    const aging=getJobAgingDays(j);
+    const created=j.createdAt?new Date(j.createdAt).toISOString().split('T')[0]:'';
+    csv+=`"${j.name}","${j.client}","${j.address}","${j.status}","${j.priority}",${j.hours||''}, "${tech?.name||'Unassigned'}","${created}",${aging}\n`;
+  });
+  const blob=new Blob([csv],{type:'text/csv'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url;
+  a.download='tas-jobs-'+new Date().toISOString().split('T')[0]+'.csv';
+  a.click();
+  URL.revokeObjectURL(url);
+  toast('Exported CSV.');
+}
+
+function importJSON(inp){
+  const file=inp.files[0];if(!file)return;
+  const r=new FileReader();
+  r.onload=e=>{
+    try{
+      const data=JSON.parse(e.target.result);
+      if(confirm('Restore from backup? This will overwrite current data.')){
+        S.techs=data.techs||[];
+        S.jobs=data.jobs||[];
+        S.notes=data.notes||{};
+        S.techs.forEach(t=>{t.skills=TECH_SKILLS_MAP[t.name]||{};});
+        initTechSkills();sortTechs();
+        saveS();renderTechs();renderJobs();updateCounts();
+        toast('Data restored from backup.');
+      }
+    }catch(e){toast('Invalid backup file: '+e.message,'err');}
+    inp.value='';
+  };
+  r.readAsText(file);
+}
+
+// ── KEYBOARD HELP ────────────────────────────────────────
+function showKeyboardHelp(){
+  toast('⌘/Ctrl+S: Save all | ⌘/Ctrl+E: Export | ⌘/Ctrl+R: Refresh | ESC: Close modal','info');
+}
+
+// ── TECH BLOCKS (UNAVAILABILITY) ────────────────────────
+function addTechBlock(techId, dateStr){
+  if(!S.techBlocks)S.techBlocks={};
+  if(!S.techBlocks[techId])S.techBlocks[techId]=[];
+  if(!S.techBlocks[techId].includes(dateStr)){
+    S.techBlocks[techId].push(dateStr);
+    saveS();
+  }
+}
+
+function removeTechBlock(techId, dateStr){
+  if(S.techBlocks?.[techId]){
+    S.techBlocks[techId]=S.techBlocks[techId].filter(d=>d!==dateStr);
+    saveS();
+  }
+}
+
+function isTechBlocked(techId, date){
+  if(!date||!S.techBlocks?.[techId])return false;
+  const dateStr=date.split('T')[0];
+  return S.techBlocks[techId].includes(dateStr);
+}
+
+// ── JOB TEMPLATES ───────────────────────────────────────
+function createJobTemplate(name, description, manufacturer, skillLevel){
+  if(!S.templates)S.templates={};
+  S.templates[Date.now()]={name,description,manufacturer,skillLevel};
+  saveS();
+  toast('Template saved: '+name);
+}
+
+function applyTemplate(templateId){
+  if(!S.templates?.[templateId])return;
+  const t=S.templates[templateId];
+  document.getElementById('ji-name').value='[TEMPLATE] '+t.name;
+  document.getElementById('ji-desc').value=t.description||'';
+  document.getElementById('ji-mfr').value=t.manufacturer||'';
+  document.getElementById('ji-sklvl').value=t.skillLevel||'1';
+  toast('Template applied. Complete and save job.');
+}
+
+// ── PERFORMANCE ANALYTICS ───────────────────────────────
+function getPerformanceMetrics(){
+  const metrics={};
+  S.techs.forEach(t=>{
+    const jobs=S.jobs.filter(j=>j.assignedTechId===t.id);
+    const completed=jobs.filter(j=>j.status==='Complete').length;
+    const total=jobs.length;
+    const avgHours=jobs.length?jobs.reduce((s,j)=>s+(j.hours||8),0)/jobs.length:0;
+    metrics[t.id]={name:t.name,assigned:total,completed,efficiency:total>0?Math.round(completed/total*100):0,avgHours:avgHours.toFixed(1)};
+  });
+  return metrics;
+}
+
+// ── KEYBOARD SHORTCUTS ───────────────────────────────────
+document.addEventListener('keydown',e=>{
+  if(e.key==='Escape'){['m-tech','m-job','m-del','m-xl','m-notes','m-backup','m-settings'].forEach(closeModal);}
+  if((e.ctrlKey||e.metaKey)&&e.key==='s'){e.preventDefault();saveS();toast('Saved.');}
+  if((e.ctrlKey||e.metaKey)&&e.key==='e'){e.preventDefault();openModal('m-backup');}
+  if((e.ctrlKey||e.metaKey)&&e.key==='z'){e.preventDefault();undo();}
+  if((e.ctrlKey||e.metaKey)&&e.key==='/')toast('Ctrl+S=Save | Ctrl+E=Export | Ctrl+Z=Undo | ESC=Close','info');
+});
+
 // ── AUTO-SCHEDULE ─────────────────────────────────────────
 async function autoSchedule(){
   const btn=document.getElementById('btn-as');
@@ -896,67 +1805,115 @@ async function autoSchedule(){
     saveS();hideLoad();
   }
 
-  // Step 2 — run proximity assignment
-  const unassigned=S.jobs.filter(j=>!j.assignedTechId&&j.status!=='Complete');
+  // Step 2 — TWO-PASS ASSIGNMENT FOR EVEN DISTRIBUTION
+  let unassigned=S.jobs.filter(j=>!j.assignedTechId&&j.status!=='Complete');
   if(!unassigned.length){toast('All jobs are already assigned.','info');btn.disabled=false;renderSched();return;}
 
   const priW={Critical:0,High:1,Medium:2,Low:3};
   const sorted=[...unassigned].sort((a,b)=>(priW[a.priority]||2)-(priW[b.priority]||2));
 
-  // busyDates[techId] = Set of dates already committed (existing + new)
   const busyDates={};
   S.techs.forEach(t=>{
     busyDates[t.id]=new Set(S.jobs.filter(j=>j.assignedTechId===t.id&&j.jobDate).map(j=>j.jobDate));
   });
 
-  // Track load (hours) for workload balance penalty
-  const load={};
-  S.techs.forEach(t=>{load[t.id]=S.jobs.filter(j=>j.assignedTechId===t.id).reduce((s,j)=>s+(j.hours||8),0);});
+  const jobCount={};
+  S.techs.forEach(t=>{jobCount[t.id]=S.jobs.filter(j=>j.assignedTechId===t.id&&j.status!=='Complete').length;});
 
-  let assigned=0;const skipped=[];
+  const skipped=[];
 
+  // PASS 1: Assign each job to CLOSEST eligible tech (ignore current load)
   sorted.forEach(job=>{
-    // Get techs available on this date
-    const avail=S.techs.filter(t=>{
+    let avail=S.techs.filter(t=>{
       if(t.active===false)return false;
-      // Date conflict check — only applies if job has a date
+      if(job.jobDate&&isTechBlocked(t.id,job.jobDate))return false;
       if(job.jobDate&&busyDates[t.id].has(job.jobDate))return false;
+      if(!techHasSkill(t,job))return false;
       return true;
     });
 
+    // Fallback for unspecified jobs
+    if(!avail.length&&!job.requiredManufacturer){
+      avail=S.techs.filter(t=>{
+        if(t.active===false)return false;
+        if(job.jobDate&&isTechBlocked(t.id,job.jobDate))return false;
+        if(job.jobDate&&busyDates[t.id].has(job.jobDate))return false;
+        return true;
+      });
+    }
+
     if(!avail.length){skipped.push(job.name);return;}
 
-    let best=null,bestScore=Infinity;
-
-    avail.forEach(t=>{
-      // Need geocoded coordinates for both tech and job
-      if(!t.lat||!job.lat){
-        // Assign anyway if no coords (score = load only)
-        const score=10000+load[t.id];
-        if(score<bestScore){bestScore=score;best=t;}
-        return;
-      }
-      // Real distance in miles
-      const miles=hdist(t.lat,t.lng,job.lat,job.lng);
-      // Small workload penalty for techs over 40h to distribute evenly
-      const score=miles+Math.max(0,load[t.id]-40)*0.5;
-      if(score<bestScore){bestScore=score;best=t;}
+    // Sort by DISTANCE ONLY - find closest tech
+    avail.sort((t1,t2)=>{
+      let d1=10000,d2=10000;
+      if(t1.lat&&job.lat)d1=hdist(t1.lat,t1.lng,job.lat,job.lng);
+      if(t2.lat&&job.lat)d2=hdist(t2.lat,t2.lng,job.lat,job.lng);
+      return d1-d2;
     });
 
-    if(best){
-      job.assignedTechId=best.id;
+    const closest=avail[0];
+    if(closest){
+      job.assignedTechId=closest.id;
       if(job.status==='Unscheduled')job.status='Scheduled';
-      if(job.jobDate)busyDates[best.id].add(job.jobDate);
-      load[best.id]+=(job.hours||8);
-      assigned++;
+      if(job.jobDate)busyDates[closest.id].add(job.jobDate);
+      jobCount[closest.id]++;
     }
+  });
+
+  // PASS 2: Rebalance distribution — move jobs from overloaded to underloaded techs
+  const totalJobs=Object.values(jobCount).reduce((a,b)=>a+b,0);
+  const avgJobs=Math.floor(totalJobs/S.techs.length);
+  const overThreshold=avgJobs+2; // Techs with more than this are overloaded
+
+  const overloaded=S.techs.filter(t=>jobCount[t.id]>overThreshold);
+  overloaded.forEach(overTech=>{
+    const overjobs=S.jobs.filter(j=>j.assignedTechId===overTech.id&&j.status!=='Complete');
+
+    overjobs.forEach(job=>{
+      if(jobCount[overTech.id]<=avgJobs+1)return; // Balanced enough
+
+      // Find underloaded techs who can take this job
+      const candidates=S.techs.filter(t=>{
+        if(t.id===overTech.id)return false;
+        if(jobCount[t.id]>=avgJobs+1)return false; // Not underloaded
+        if(t.active===false)return false;
+        if(job.jobDate&&isTechBlocked(t.id,job.jobDate))return false;
+        if(job.jobDate&&busyDates[t.id].has(job.jobDate))return false;
+        if(!techHasSkill(t,job))return false;
+        return true;
+      });
+
+      if(!candidates.length)return;
+
+      // Find best candidate (prefer closer)
+      candidates.sort((t1,t2)=>{
+        let d1=10000,d2=10000;
+        if(t1.lat&&job.lat)d1=hdist(t1.lat,t1.lng,job.lat,job.lng);
+        if(t2.lat&&job.lat)d2=hdist(t2.lat,t2.lng,job.lat,job.lng);
+        return d1-d2;
+      });
+
+      const newTech=candidates[0];
+      if(newTech){
+        job.assignedTechId=newTech.id;
+        if(job.jobDate){
+          busyDates[overTech.id].delete(job.jobDate);
+          busyDates[newTech.id].add(job.jobDate);
+        }
+        jobCount[overTech.id]--;
+        jobCount[newTech.id]++;
+      }
+    });
   });
 
   saveS();renderSched();btn.disabled=false;
 
-  let msg=`Scheduled ${assigned} job${assigned!==1?'s':''} by address proximity.`;
-  if(skipped.length)msg+=` ${skipped.length} skipped — all techs busy that date.`;
-  toast(msg,skipped.length?'info':'ok');
+  const assigned=S.jobs.filter(j=>j.assignedTechId&&j.status!=='Complete').length;
+  const unass=S.jobs.filter(j=>!j.assignedTechId&&j.status!=='Complete').length;
+  let msg=`Scheduled ${assigned} jobs evenly across ${S.techs.length} techs.`;
+  if(unass)msg+=` ${unass} could not be assigned.`;
+  toast(msg,'ok');
 }
 
 function clearSchedule(){
@@ -983,15 +1940,16 @@ function setView(v){
 function renderSchedSum(){
   const el=document.getElementById('sched-sum');
   if(!S.jobs.length){el.style.display='none';return;}
-  const asgn=S.jobs.filter(j=>j.assignedTechId).length;
-  const actv=new Set(S.jobs.filter(j=>j.assignedTechId).map(j=>j.assignedTechId)).size;
-  const totalH=S.jobs.reduce((s,j)=>s+(j.hours||0),0);
+  const activeJobs=S.jobs.filter(j=>j.status!=='Complete');
+  const asgn=activeJobs.filter(j=>j.assignedTechId).length;
+  const actv=new Set(activeJobs.filter(j=>j.assignedTechId).map(j=>j.assignedTechId)).size;
+  const totalH=activeJobs.reduce((s,j)=>s+(j.hours||0),0);
   el.style.display='flex';
   el.innerHTML=[
     ['fa-check-circle','#34d399',asgn,'Assigned'],
-    ['fa-clock','#f59e0b',S.jobs.length-asgn,'Unassigned'],
+    ['fa-clock','#f59e0b',activeJobs.length-asgn,'Unassigned'],
     ['fa-hard-hat','#0693e3',actv,'Techs Active'],
-    ['fa-list','#8b5cf6',S.jobs.length,'Total Jobs'],
+    ['fa-list','#8b5cf6',activeJobs.length,'Active Jobs'],
     ['fa-hourglass-half','#ec4899',totalH?totalH+'h':'—','Est. Hours'],
   ].map(([ic,col,val,lbl],i,arr)=>
     `<div style="display:flex;align-items:center;gap:10px">
@@ -1005,6 +1963,8 @@ function renderSchedCards(){
   const tj={};S.techs.forEach(t=>{tj[t.id]=[];});
   const ua=[];
   S.jobs.forEach(j=>{
+    // Only include incomplete jobs in schedule
+    if(j.status==='Complete')return;
     if(j.assignedTechId&&tj[j.assignedTechId]!==undefined)tj[j.assignedTechId].push(j);
     else if(!j.assignedTechId)ua.push(j);
   });
@@ -1148,6 +2108,13 @@ function hideLoad(){document.getElementById('loading-overlay').classList.remove(
 // ── MODAL ─────────────────────────────────────────────────
 function openModal(id){document.getElementById(id).classList.add('open');}
 function closeModal(id){document.getElementById(id).classList.remove('open');}
+function openSettings(){
+  document.getElementById('set-backup').checked=SETTINGS.autoBackup;
+  document.getElementById('set-geo').checked=SETTINGS.showGeoDetails;
+  document.getElementById('set-radius').value=SETTINGS.radius;
+  document.getElementById('radius-val').textContent=SETTINGS.radius;
+  openModal('m-settings');
+}
 
 // ── TOAST ─────────────────────────────────────────────────
 let _tT;
