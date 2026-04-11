@@ -1497,6 +1497,30 @@ function autoImportTexasAirSystems(rows,headers){
   toast(`Auto-imported ${n} work order${n!==1?'s':''} from Texas AirSystems format.`);
 }
 
+// ── AUTO-MAP COLUMNS ─────────────────────────────────────
+function autoMapColumns(headers){
+  const findCol=(...queries)=>{
+    for(const q of queries){
+      const qLow=q.toLowerCase();
+      const idx=headers.findIndex(h=>{
+        const hLow=h.toLowerCase();
+        return hLow===qLow||hLow.includes(qLow);
+      });
+      if(idx>=0)return idx;
+    }
+    return -1;
+  };
+  return {
+    name:findCol('work order number','work order','wo #','job number','job name','order number'),
+    client:findCol('service account','client','customer','account name','account'),
+    address:findCol('address','location','site address','street','site'),
+    jobDate:findCol('date','job date','scheduled date','due date','service date'),
+    priority:findCol('priority'),
+    status:findCol('status','system status','order status'),
+    hours:findCol('hours','estimated hours','duration','time'),
+    description:findCol('description','short description','notes','details','remarks')
+  };
+}
 // ── EXCEL IMPORT ─────────────────────────────────────────
 function handleExcel(inp){
   const file=inp.files[0];if(!file)return;
@@ -1520,13 +1544,48 @@ function handleExcel(inp){
         return;
       }
 
-      // Manual mapping for other formats
+      // Try to auto-map and import without modal
+      const mapped=autoMapColumns(headers);
+      if(mapped.name>=0&&mapped.client>=0&&mapped.address>=0){
+        // We found all required columns! Auto-import
+        if(S.jobs.length>0){
+          if(!confirm('This will add to existing jobs. Continue?'))return;
+        }
+        doAutoImport(dataRows,headers,mapped);
+        return;
+      }
+
+      // Fall back to manual mapping modal
       xlData={headers,rows:dataRows};
       showXlModal();
     }catch(e){toast('Failed to read file: '+e.message,'err');}
     inp.value='';
   };
   r.readAsBinaryString(file);
+}
+function doAutoImport(rows,headers,C){
+  const VP=['Low','Medium','High','Critical'],VS=['Unscheduled','Scheduled','In Progress','Complete'];
+  let n=0;
+  rows.forEach(row=>{
+    const name=String(row[C.name]??'').trim(),client=String(row[C.client]??'').trim(),address=String(row[C.address]??'').trim();
+    if(!name||!client||!address)return;
+    let priority=C.priority>=0?String(row[C.priority]??'').trim():'Medium';
+    if(!VP.includes(priority))priority='Medium';
+    let status=C.status>=0?String(row[C.status]??'').trim():'Unscheduled';
+    if(!VS.includes(status))status='Unscheduled';
+    S.jobs.push({id:'j'+Date.now()+'-'+n,createdAt:Date.now(),lat:null,lng:null,
+      name,client,address,
+      jobDate:C.jobDate>=0?String(row[C.jobDate]??'').trim()||null:null,
+      priority,status,
+      hours:C.hours>=0?parseFloat(row[C.hours])||null:null,
+      description:C.description>=0?String(row[C.description]??'').trim():'',
+      assignedTechId:null,
+      requiredManufacturer:null,
+      requiredSkillLevel:1});
+    n++;
+  });
+  saveS();renderJobs();updateCounts();enqueueAll();
+  toast(`Auto-imported ${n} job${n!==1?'s':''} from spreadsheet.`);
 }
 function showXlModal(){
   const FIELDS=[
@@ -1543,11 +1602,12 @@ function showXlModal(){
     const ai=xlData.headers.findIndex(h=>{
       const hl=h.toLowerCase();
       return hl===f.k||
-        (f.k==='name'&&(hl.includes('job')||hl.includes('number')||hl.includes('work order')))||
-        (f.k==='client'&&(hl.includes('client')||hl.includes('customer')))||
-        (f.k==='address'&&(hl.includes('address')||hl.includes('location')||hl.includes('site')))||
-        (f.k==='jobDate'&&(hl.includes('date')||hl.includes('scheduled')))||
-        (f.k==='hours'&&(hl.includes('hour')||hl.includes('time')));
+        (f.k==='name'&&(hl.includes('job')||hl.includes('number')||hl.includes('work order')||hl.includes('wo #')))||
+        (f.k==='client'&&(hl.includes('client')||hl.includes('customer')||hl.includes('service account')||hl.includes('account')))||
+        (f.k==='address'&&(hl.includes('address')||hl.includes('location')||hl.includes('site')||hl.includes('street')))||
+        (f.k==='jobDate'&&(hl.includes('date')||hl.includes('scheduled')||hl.includes('due date')))||
+        (f.k==='hours'&&(hl.includes('hour')||hl.includes('time')||hl.includes('duration')))||
+        (f.k==='description'&&(hl.includes('desc')||hl.includes('notes')||hl.includes('details')));
     });
     return `<div>
       <label style="font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:.06em;display:block;margin-bottom:5px">${f.label}${f.req?' *':''}</label>
